@@ -1,24 +1,47 @@
 {
   "expo": {
-    "name": "qarota-mobile",
+    "name": "Qarota",
     "slug": "qarota-mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSMicrophoneUsageDescription": "Qarota needs access to your microphone to record voice notes.",
+        "NSPhotoLibraryUsageDescription": "Qarota needs access to your photos to let you upload pictures and videos.",
+        "NSCameraUsageDescription": "Qarota needs access to your camera to take profile photos, videos, and verification selfies.",
+        "NSPhotoLibraryAddUsageDescription": "Qarota needs permission to save photos to your gallery."
+      }
     },
     "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+      "package": "com.qarota.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "22c0d9db-fa1c-4b3e-abc3-448c07c22050"
+      }
+    },
+    "plugins": [
+      "expo-localization",
+      "expo-audio",
+      "expo-image"
+    ]
   }
 }
