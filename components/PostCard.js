@@ -1,19 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as Haptics from 'expo-haptics'; 
 import * as MediaLibrary from 'expo-media-library';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import { 
   View, Text, StyleSheet, TouchableOpacity, Alert, Modal, 
   useWindowDimensions, Share, Dimensions, Pressable, ActivityIndicator 
 } from 'react-native';
 import { Image } from 'expo-image'; // <-- ADDED THIS
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useAudioPlayer } from 'expo-audio';
+import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { 
   Heart, MessageCircle, MoreHorizontal, Mic, Play, Bookmark, Share2, X, Download, Flag, Trash2, Pencil 
 } from 'lucide-react-native'; 
 import { timeAgo } from '../lib/timeAgo';
-import { apiRequest, MEDIA_BASE } from '../lib/api';
+import { apiRequest, MEDIA_BASE, getAuthenticatedMediaSource, getAuthToken } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import LikesModal from './LikesModal'; 
 
@@ -26,6 +26,8 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
   const [likesModalVisible, setLikesModalVisible] = useState(false); 
   const [isBookmarked, setIsBookmarked] = useState(post.is_bookmarked || false);
   const [isSaving, setIsSaving] = useState(false); 
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [videoLoadFailed, setVideoLoadFailed] = useState(false);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [showReadMore, setShowReadMore] = useState(false);
@@ -47,12 +49,28 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
   const isVideo = post.media_type === 'video';
   const isVoice = post.media_type === 'voice';
 
-  const videoSource = isVideo ? getMediaUrl(post.media_path) : null;
+  const authToken = getAuthToken();
+  const postMediaSource = useMemo(
+    () => getAuthenticatedMediaSource(`media.php?kind=post&id=${encodeURIComponent(post.id)}`),
+    [post.id, authToken]
+  );
+  const videoSource = isVideo ? postMediaSource : null;
   
   const videoPlayer = useVideoPlayer(videoSource, player => {
     player.loop = true;
     player.muted = true;
   });
+  useEffect(() => {
+    setImageLoadFailed(false);
+    setVideoLoadFailed(false);
+  }, [post.id]);
+
+  useEffect(() => {
+    const subscription = videoPlayer.addListener('statusChange', ({ status }) => {
+      setVideoLoadFailed(status === 'error');
+    });
+    return () => subscription.remove();
+  }, [videoPlayer]);
 
   useEffect(() => {
     if (videoSource && videoPlayer) {
@@ -64,8 +82,9 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
     }
   }, [isVisible, videoSource, videoPlayer]);
 
-  const audioSource = isVoice ? getMediaUrl(post.media_path) : null;
+  const audioSource = isVoice ? postMediaSource : null;
   const audioPlayer = useAudioPlayer(audioSource);
+  const audioStatus = useAudioPlayerStatus(audioPlayer);
 
   const handleDelete = () => {
     setMenuVisible(false);
@@ -140,8 +159,11 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
         return Alert.alert('Permission needed', 'Please allow Qarota to save photos to your gallery.');
       }
 
-      const fileUri = FileSystem.cacheDirectory + `qarota_${post.id}.jpg`;
-      const { uri } = await FileSystem.downloadAsync(getMediaUrl(post.media_path), fileUri);
+      const extension = post.media_path?.match(/\.(jpe?g|png|webp)$/i)?.[1]?.toLowerCase() || 'jpg';
+      const fileUri = FileSystem.cacheDirectory + `qarota_${post.id}.${extension}`;
+      const { uri } = await FileSystem.downloadAsync(postMediaSource.uri, fileUri, {
+        headers: postMediaSource.headers,
+      });
       
       await MediaLibrary.saveToLibraryAsync(uri);
       Alert.alert('Success', 'Image saved to your gallery!');
@@ -212,7 +234,7 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       <View style={styles.header}>
         <TouchableOpacity style={styles.headerLeft} onPress={onProfilePress}>
           {post.author.avatar ? (
-            <Image 
+            <Image
               source={{ uri: getMediaUrl(post.author.avatar) }} 
               style={styles.avatar} 
               contentFit="cover" 
@@ -281,11 +303,18 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       {/* Image with Double Tap to Like */}
       {isImage && post.media_path ? (
         <Pressable onPress={handleImagePress} style={{ position: 'relative' }}>
-          <Image 
-            source={{ uri: getMediaUrl(post.media_path) }} 
-            style={[styles.postImage, { height: mediaHeight }]} 
-            contentFit="cover"
-          />
+          {imageLoadFailed ? (
+            <View style={[styles.postImage, { height: mediaHeight, justifyContent: 'center', alignItems: 'center' }]}>
+              <Text style={{ color: theme.textMuted }}>Media unavailable. Check your connection or sign in again.</Text>
+            </View>
+          ) : (
+            <Image
+              source={postMediaSource}
+              style={[styles.postImage, { height: mediaHeight }]}
+              contentFit="cover"
+              onError={() => setImageLoadFailed(true)}
+            />
+          )}
           {showHeart && (
             <View style={StyleSheet.absoluteFillObject}>
               <View style={styles.heartOverlay}>
@@ -299,13 +328,19 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       {/* Video */}
       {videoSource ? (
         <View style={[styles.postImage, { height: mediaHeight, overflow: 'hidden', position: 'relative' }]}>
-          <VideoView
-            style={{ width: '100%', height: '100%' }}
-            player={videoPlayer}
-            allowsFullscreen
-            allowsPictureInPicture
-            nativeControls
-          />
+          {videoLoadFailed ? (
+            <Text style={{ color: theme.textMuted, textAlign: 'center', margin: 16 }}>
+              Video unavailable. Check your connection or sign in again.
+            </Text>
+          ) : (
+            <VideoView
+              style={{ width: '100%', height: '100%' }}
+              player={videoPlayer}
+              allowsFullscreen
+              allowsPictureInPicture
+              nativeControls
+            />
+          )}
         </View>
       ) : null}
 
@@ -317,7 +352,7 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
         >
           <Mic color={theme.primary} size={20} style={{ marginRight: 12 }} />
           <Text style={{ color: theme.text, flex: 1, fontWeight: '600' }}>
-            Voice Note ({post.media_duration || 0}s)
+            {audioStatus.error ? 'Voice note unavailable' : `Voice Note (${post.media_duration || 0}s)`}
           </Text>
           <Play color={theme.primary} size={16} fill={theme.primary} />
         </TouchableOpacity>
@@ -365,11 +400,16 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
           <TouchableOpacity style={styles.closeBtn} onPress={() => setImageModalVisible(false)}>
             <X color="#fff" size={32} />
           </TouchableOpacity>
-          <Image 
-            source={{ uri: getMediaUrl(post.media_path) }} 
-            style={styles.fullScreenImage} 
-            contentFit="contain" 
-          />
+          {imageLoadFailed ? (
+            <Text style={{ color: '#fff' }}>Media unavailable. Check your connection or sign in again.</Text>
+          ) : (
+            <Image
+              source={postMediaSource}
+              style={styles.fullScreenImage}
+              contentFit="contain"
+              onError={() => setImageLoadFailed(true)}
+            />
+          )}
         </View>
       </Modal>
 

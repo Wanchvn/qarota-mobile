@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, StyleSheet, Text, ScrollView } from 'react-native';
 import { NavigationContainer, DefaultTheme as NavigationDefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -52,10 +52,8 @@ import VerificationRequestScreen from './screens/VerificationRequestScreen';
 import ActiveSessionsScreen from './screens/ActiveSessionsScreen';
 import FeedPreferencesScreen from './screens/FeedPreferencesScreen';
 
-// --- NEW 2FA IMPORTS ---
 import TwoFactorSetupScreen from './screens/TwoFactorSetupScreen';
 import TwoFactorVerifyScreen from './screens/TwoFactorVerifyScreen';
-// ----------------------
 
 import { setAuthToken, setUnauthorizedHandler } from './lib/api';
 import { AppProvider, useAppContext } from './lib/AppContext';
@@ -63,6 +61,33 @@ import { useTheme } from './lib/theme';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
+
+// Error Boundary
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error("App Crashed:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <Text style={{ color: 'red', fontSize: 20, fontWeight: 'bold', marginBottom: 10 }}>App Crashed</Text>
+          <ScrollView style={{ maxHeight: 400 }}>
+            <Text style={{ color: 'red' }}>{this.state.error?.toString()}</Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function MainTabs({ onLogout }) {
   const { unreadMessages } = useAppContext();
@@ -80,44 +105,12 @@ function MainTabs({ onLogout }) {
         paddingTop: 5,
       }
     })}>
-      <Tab.Screen 
-        name="FeedTab" 
-        options={{ 
-          title: t('feed'),
-          tabBarIcon: ({ color, size }) => <Home color={color} size={size} />
-        }}
-      >
+      <Tab.Screen name="FeedTab" options={{ title: t('feed'), tabBarIcon: ({ color, size }) => <Home color={color} size={size} /> }}>
         {(props) => <HomeScreen {...props} onLogout={onLogout} />}
       </Tab.Screen>
-      
-      <Tab.Screen 
-        name="SearchTab" 
-        component={SearchScreen} 
-        options={{ 
-          title: t('search'),
-          tabBarIcon: ({ color, size }) => <Search color={color} size={size} />
-        }} 
-      />
-      
-      <Tab.Screen 
-        name="DatingTab" 
-        component={DatingScreen} 
-        options={{ 
-          title: t('dating'),
-          tabBarIcon: ({ color, size }) => <Heart color={color} size={size} />
-        }} 
-      />
-      
-      <Tab.Screen 
-        name="MessagesTab" 
-        component={MessagesScreen} 
-        options={{ 
-          title: t('messages'),
-          tabBarBadge: unreadMessages > 0 ? unreadMessages : null,
-          tabBarBadgeStyle: { backgroundColor: theme.primary, fontSize: 10 },
-          tabBarIcon: ({ color, size }) => <MessageSquare color={color} size={size} />
-        }} 
-      />
+      <Tab.Screen name="SearchTab" component={SearchScreen} options={{ title: t('search'), tabBarIcon: ({ color, size }) => <Search color={color} size={size} /> }} />
+      <Tab.Screen name="DatingTab" component={DatingScreen} options={{ title: t('dating'), tabBarIcon: ({ color, size }) => <Heart color={color} size={size} /> }} />
+      <Tab.Screen name="MessagesTab" component={MessagesScreen} options={{ title: t('messages'), tabBarBadge: unreadMessages > 0 ? unreadMessages : null, tabBarBadgeStyle: { backgroundColor: theme.primary, fontSize: 10 }, tabBarIcon: ({ color, size }) => <MessageSquare color={color} size={size} /> }} />
     </Tab.Navigator>
   );
 }
@@ -128,15 +121,12 @@ export default function App() {
   const [hasOnboarded, setHasOnboarded] = useState(true);
   const theme = useTheme();
 
-  const handleLogout = async () => {
-    try {
-      await SecureStore.deleteItemAsync('qarota_token');
-    } catch (e) {}
-    setAuthToken(null);
+  const handleLogout = () => {
     setIsLoggedIn(false);
+    setAuthToken(null);
+    SecureStore.deleteItemAsync('qarota_token').catch(() => {});
   };
 
-  // Register the global 401 handler
   useEffect(() => {
     setUnauthorizedHandler(() => {
       handleLogout();
@@ -144,8 +134,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // 1. Load language in the background. DO NOT block the UI with 'await'.
+    loadSavedLanguage().catch(e => console.log("Language load error:", e));
+
+    // 2. Handle token and onboarding without hanging
     (async () => {
-      await loadSavedLanguage();
       try {
         const onboarded = await AsyncStorage.getItem('@qarota_onboarded');
         setHasOnboarded(onboarded === 'true');
@@ -153,12 +146,14 @@ export default function App() {
         const token = await SecureStore.getItemAsync('qarota_token');
         if (token) {
           setAuthToken(token);
-          setIsLoggedIn(true);
+          setIsLoggedIn(true); 
         }
       } catch (e) {
         console.log('Startup error:', e);
+      } finally {
+        // 3. This will ALWAYS run now
+        setIsLoading(false);
       }
-      setIsLoading(false);
     })();
   }, []);
 
@@ -179,84 +174,87 @@ export default function App() {
   };
 
   return (
-    <SafeAreaProvider>
-      <AppProvider>
-        <NavigationContainer theme={navTheme}>
-          <Stack.Navigator 
-            screenOptions={{ 
-              headerStyle: { backgroundColor: theme.header },
-              headerTintColor: '#fff',
-              headerTitleStyle: { color: theme.headerText, fontWeight: '800' }
-            }}
-          >
-            {!hasOnboarded ? (
-              <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
-                {(props) => <OnboardingScreen {...props} onFinish={() => setHasOnboarded(true)} />}
-              </Stack.Screen>
-            ) : isLoggedIn ? (
-              <React.Fragment>
-                <Stack.Screen name="Main" options={{ headerShown: false }}>
-                  {(props) => <MainTabs {...props} onLogout={handleLogout} />}
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AppProvider>
+          <NavigationContainer theme={navTheme}>
+            <Stack.Navigator 
+              key={isLoggedIn ? 'loggedIn' : 'loggedOut'}
+              screenOptions={{ 
+                headerStyle: { backgroundColor: theme.header },
+                headerTintColor: '#fff',
+                headerTitleStyle: { color: theme.headerText, fontWeight: '800' }
+              }}
+            >
+              {!hasOnboarded ? (
+                <Stack.Screen name="Onboarding" options={{ headerShown: false }}>
+                  {(props) => <OnboardingScreen {...props} onFinish={() => setHasOnboarded(true)} />}
                 </Stack.Screen>
-                <Stack.Screen name="Compose" options={{ presentation: 'modal', title: 'New Post' }}>
-                  {(props) => <ComposeScreen {...props} onClose={() => props.navigation.goBack()} onPosted={() => { props.navigation.goBack(); }} />}
-                </Stack.Screen>
-                <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: false, presentation: 'modal' }} />
-                <Stack.Screen name="DatingProfile" component={DatingProfileScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Chat" component={ChatScreen} />
-                <Stack.Screen name="Profile" component={ProfileScreen} />
-                <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Topics" component={TopicsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Discover" component={DiscoverScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="MyReports" component={MyReportsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ExportData" component={ExportDataScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="DeleteAccount">
-                  {(props) => <DeleteAccountScreen {...props} onLogout={handleLogout} />}
-                </Stack.Screen>
-                <Stack.Screen name="EditPost" component={EditPostScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="Connections" component={ConnectionsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="DatingMatches" component={DatingMatchesScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="TopicDetail" component={TopicDetailScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="VerificationRequest" component={VerificationRequestScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ActiveSessions" component={ActiveSessionsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="FeedPreferences" component={FeedPreferencesScreen} options={{ headerShown: false }} />
-                
-                {/* NEW: Two Factor Setup (Logged In) */}
-                <Stack.Screen name="TwoFactorSetup" component={TwoFactorSetupScreen} options={{ headerShown: false }} />
-                
-                <Stack.Screen name="AdminAppeals" component={AdminAppealsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="AdminReports" component={AdminReportsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="AdminVerifications" component={AdminVerificationsScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ModerationLog" component={ModerationLogScreen} options={{ headerShown: false }} />
-              </React.Fragment>
-            ) : (
-              <React.Fragment>
-                <Stack.Screen name="Login" options={{ headerShown: false }}>
-                  {(props) => <LoginScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
-                </Stack.Screen>
-                <Stack.Screen name="Register" options={{ headerShown: false }}>
-                  {(props) => <RegisterScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
-                </Stack.Screen>
-                <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
-                <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
-                
-                {/* NEW: Two Factor Verify (Logged Out / Login Flow) */}
-                <Stack.Screen name="TwoFactorVerify" options={{ headerShown: false }}>
-                  {(props) => <TwoFactorVerifyScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
-                </Stack.Screen>
-              </React.Fragment>
-            )}
-          </Stack.Navigator>
-        </NavigationContainer>
-      </AppProvider>
-    </SafeAreaProvider>
+              ) : isLoggedIn ? (
+                <React.Fragment>
+                  <Stack.Screen name="Main" options={{ headerShown: false }}>
+                    {(props) => <MainTabs {...props} onLogout={handleLogout} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="Compose" options={{ presentation: 'modal', title: 'New Post' }}>
+                    {(props) => <ComposeScreen {...props} onClose={() => props.navigation.goBack()} onPosted={() => { props.navigation.goBack(); }} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: false, presentation: 'modal' }} />
+                  <Stack.Screen name="DatingProfile" component={DatingProfileScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="Chat" component={ChatScreen} />
+                  <Stack.Screen name="Profile" component={ProfileScreen} />
+                  <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="Topics" component={TopicsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="Discover" component={DiscoverScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="MyReports" component={MyReportsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="ExportData" component={ExportDataScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="DeleteAccount">
+                    {(props) => <DeleteAccountScreen {...props} onLogout={handleLogout} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="EditPost" component={EditPostScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="Connections" component={ConnectionsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="DatingMatches" component={DatingMatchesScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="PostDetail" component={PostDetailScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="PrivacySettings" component={PrivacySettingsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="TopicDetail" component={TopicDetailScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="VerificationRequest" component={VerificationRequestScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="ActiveSessions" component={ActiveSessionsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="FeedPreferences" component={FeedPreferencesScreen} options={{ headerShown: false }} />
+                  
+                  <Stack.Screen name="TwoFactorSetup" options={{ headerShown: false }}>
+                    {(props) => <TwoFactorSetupScreen {...props} onLogout={handleLogout} />}
+                  </Stack.Screen>
+                  
+                  <Stack.Screen name="AdminAppeals" component={AdminAppealsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="AdminReports" component={AdminReportsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="AdminVerifications" component={AdminVerificationsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="ModerationLog" component={ModerationLogScreen} options={{ headerShown: false }} />
+                </React.Fragment>
+              ) : (
+                <React.Fragment>
+                  <Stack.Screen name="Login" options={{ headerShown: false }}>
+                    {(props) => <LoginScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="Register" options={{ headerShown: false }}>
+                    {(props) => <RegisterScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
+                  
+                  <Stack.Screen name="TwoFactorVerify" options={{ headerShown: false }}>
+                    {(props) => <TwoFactorVerifyScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
+                  </Stack.Screen>
+                </React.Fragment>
+              )}
+            </Stack.Navigator>
+          </NavigationContainer>
+        </AppProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

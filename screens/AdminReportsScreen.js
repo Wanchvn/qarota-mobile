@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, ShieldAlert, CheckCircle, Trash2, MessageSquare, FileText } from 'lucide-react-native';
-import { apiRequest, MEDIA_BASE } from '../lib/api';
+import { apiRequest, getAuthenticatedMediaSource } from '../lib/api';
 import { useTheme } from '../lib/theme';
 
 export default function AdminReportsScreen({ navigation }) {
@@ -15,12 +15,6 @@ export default function AdminReportsScreen({ navigation }) {
   const [dmReports, setDmReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  const getMediaUrl = (path) => {
-    if (!path) return null;
-    if (path.startsWith('http')) return path;
-    return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
-  };
 
   const fetchReports = async () => {
     try {
@@ -111,7 +105,7 @@ export default function AdminReportsScreen({ navigation }) {
                   {report.post_content}
                 </Text>
                 {report.post_media && (
-                  <Image source={{ uri: getMediaUrl(report.post_media) }} style={styles.postMedia} />
+                  <Image source={getAuthenticatedMediaSource(`media.php?kind=post&id=${encodeURIComponent(report.post_id)}`)} style={styles.postMedia} />
                 )}
               </>
             )}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, FlatList, ActivityIndicator, KeyboardAvoidingView, Platform, Image } from 'react-native';
-import { apiRequest } from '../lib/api';
+import { apiRequest, MEDIA_BASE } from '../lib/api';
 import { timeAgo } from '../lib/timeAgo';
 
 export default function CommentModal({ visible, postId, onClose, onCommentAdded }) {
@@ -8,6 +8,11 @@ export default function CommentModal({ visible, postId, onClose, onCommentAdded 
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const getMediaUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith('http')) return path;
+    return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
+  };
 
   useEffect(() => {
     if (visible && postId) {
@@ -66,7 +71,7 @@ export default function CommentModal({ visible, postId, onClose, onCommentAdded 
               renderItem={({ item }) => (
                 <View style={styles.comment}>
                   {item.author.avatar ? (
-                    <Image source={{ uri: `http://192.168.1.91/qarota/${item.author.avatar}` }} style={styles.avatar} />
+                    <Image source={{ uri: getMediaUrl(item.author.avatar) }} style={styles.avatar} />
                   ) : (
                     <View style={styles.avatarPlaceholder}><Text style={styles.avatarText}>{item.author.name.charAt(0)}</Text></View>
                   )}

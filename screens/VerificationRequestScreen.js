@@ -60,42 +60,59 @@ export default function VerificationRequestScreen({ navigation }) {
     formData.append('id_number', idNumber);
     formData.append('reason', reason);
 
+    // Handle iOS URIs
+    let frontUri = frontImage.uri;
+    let backUri = backImage ? backImage.uri : null;
+
+    if (Platform.OS === 'ios') {
+      if (frontUri.startsWith('file://')) frontUri = frontUri.replace('file://', '/private');
+      if (backUri && backUri.startsWith('file://')) backUri = backUri.replace('file://', '/private');
+    }
+
     // Append Front ID
-    const frontFilename = frontImage.uri.split('/').pop();
+    const frontFilename = frontUri.split('/').pop();
     const frontMatch = /\.(\w+)$/.exec(frontFilename);
     const frontType = frontMatch ? `image/${frontMatch[1]}` : `image/jpeg`;
-    formData.append('id_front', { uri: frontImage.uri, name: frontFilename, type: frontType });
+    formData.append('id_front', { uri: frontUri, name: frontFilename, type: frontType });
 
     // Append Back ID (if exists)
-    if (backImage) {
-      const backFilename = backImage.uri.split('/').pop();
+    if (backUri) {
+      const backFilename = backUri.split('/').pop();
       const backMatch = /\.(\w+)$/.exec(backFilename);
       const backType = backMatch ? `image/${backMatch[1]}` : `image/jpeg`;
-      formData.append('id_back', { uri: backImage.uri, name: backFilename, type: backType });
+      formData.append('id_back', { uri: backUri, name: backFilename, type: backType });
     }
 
-    try {
-      const response = await fetch(`${API_BASE}/apply_verification.php`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${getAuthToken()}`,
-          'Accept': 'application/json',
-        },
-        body: formData,
-      });
-      
-      const data = await response.json();
+    // --- REPLACED FETCH WITH XMLHTTPREQUEST ---
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/apply_verification.php`);
+    xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+    xhr.setRequestHeader('Accept', 'application/json');
 
-      if (data.success) {
-        setSubmitted(true);
-      } else {
-        Alert.alert('Error', data.error || 'Could not submit application.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Network error while uploading.');
-    } finally {
+    xhr.onload = () => {
       setLoading(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            setSubmitted(true);
+          } else {
+            Alert.alert('Error', data.error || 'Could not submit application.');
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Invalid response from server.');
+        }
+      } else {
+        Alert.alert('Error', `Server responded with status ${xhr.status}`);
+      }
+    };
+
+    xhr.onerror = () => {
+      setLoading(false);
+      Alert.alert('Error', 'Network error while uploading.');
+    };
+
+    xhr.send(formData);
   };
 
   if (submitted) {

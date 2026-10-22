@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, 
   ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert, Modal 
@@ -7,13 +7,19 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Send, Camera, Mic, Play, Pause, Square, X } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { apiRequest, MEDIA_BASE, getAuthToken, API_BASE } from '../lib/api';
+import { apiRequest, getAuthToken, API_BASE, getAuthenticatedMediaSource } from '../lib/api';
+import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../lib/theme';
 import { timeAgo } from '../lib/timeAgo';
 
 // --- AUDIO PLAYER COMPONENT ---
-const AudioMessage = ({ uri, isMine, theme }) => {
-  const player = useAudioPlayer(uri);
+const AudioMessage = ({ messageId, isMine, theme }) => {
+  const authToken = getAuthToken();
+  const source = useMemo(
+    () => getAuthenticatedMediaSource(`media.php?kind=message&id=${encodeURIComponent(messageId)}`),
+    [messageId, authToken]
+  );
+  const player = useAudioPlayer(source);
   const status = useAudioPlayerStatus(player); // Tracks if it's playing or paused
 
   const handleTogglePlay = () => {
@@ -38,13 +44,43 @@ const AudioMessage = ({ uri, isMine, theme }) => {
         )}
       </View>
       <Text style={{ color: isMine ? '#fff' : theme.text, fontWeight: 'bold' }}>
-        {status.playing ? 'Playing...' : 'Voice Note'}
+        {status.error ? 'Voice note unavailable' : status.playing ? 'Playing...' : 'Voice Note'}
       </Text>
     </TouchableOpacity>
   );
 };
 // ------------------------------
 // -------------------------------------------------------------------
+
+const VideoMessage = ({ messageId }) => {
+  const authToken = getAuthToken();
+  const source = useMemo(
+    () => getAuthenticatedMediaSource(`media.php?kind=message&id=${encodeURIComponent(messageId)}`),
+    [messageId, authToken]
+  );
+  const player = useVideoPlayer(source);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const subscription = player.addListener('statusChange', ({ status }) => {
+      setFailed(status === 'error');
+    });
+    return () => subscription.remove();
+  }, [player]);
+
+  if (failed) {
+    return <Text style={{ color: '#888' }}>Video unavailable. Check your connection or sign in again.</Text>;
+  }
+
+  return (
+    <VideoView
+      player={player}
+      style={{ width: 240, height: 180, borderRadius: 8, overflow: 'hidden' }}
+      nativeControls
+      allowsFullscreen
+    />
+  );
+};
 
 export default function ChatScreen({ route, navigation }) {
   const { id, name } = route.params;
@@ -67,11 +103,9 @@ export default function ChatScreen({ route, navigation }) {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
 
-  const getMediaUrl = (path) => {
-    if (!path) return null;
-    if (path.startsWith('http')) return path;
-    return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
-  };
+  const getMessageMediaSource = (message) => getAuthenticatedMediaSource(
+    `media.php?kind=message&id=${encodeURIComponent(message.id)}`
+  );
 
   const fetchMessages = async () => {
     try {
@@ -262,29 +296,41 @@ export default function ChatScreen({ route, navigation }) {
     const bubbleStyle = isMine ? [styles.bubble, styles.bubbleMine] : [styles.bubble, styles.bubbleTheirs];
 
     const msgType = item.message_type || item.type; 
+    const mediaSource = !item.is_deleted && ['image', 'voice', 'video'].includes(msgType)
+      ? getMessageMediaSource(item)
+      : null;
     const isImage = msgType === 'image' || (item.body && item.body.match(/\.(jpeg|jpg|gif|png)$/i));
     const isVoice = msgType === 'voice' || (item.body && item.body.match(/\.(m4a|mp3|wav)$/i));
+    const isVideo = msgType === 'video';
 
     return (
       <TouchableOpacity activeOpacity={0.8} onLongPress={() => handleLongPress(item)} style={bubbleStyle}>
         
         {isImage && !item.is_deleted ? (
           <TouchableOpacity onPress={() => {
-            setViewerImage(getMediaUrl(item.body));
+            setViewerImage(mediaSource);
             setViewerVisible(true);
           }}>
-            <Image source={{ uri: getMediaUrl(item.body) }} style={styles.messageImage} />
+            <Image
+              source={mediaSource}
+              style={styles.messageImage}
+              onError={() => Alert.alert('Media unavailable', 'This image could not be loaded. Check your connection or sign in again.')}
+            />
           </TouchableOpacity>
         ) : 
         
         isVoice && !item.is_deleted ? (
           <AudioMessage 
-            uri={getMediaUrl(item.body)} 
+            messageId={item.id}
             isMine={isMine} 
             theme={theme} 
           />
         ) : 
         
+        isVideo && !item.is_deleted ? (
+          <VideoMessage messageId={item.id} />
+        ) :
+
         (
           <Text style={[
             styles.msgText, 
@@ -374,9 +420,10 @@ export default function ChatScreen({ route, navigation }) {
           
           {viewerImage && (
             <Image 
-              source={{ uri: viewerImage }} 
+              source={viewerImage}
               style={{ width: '100%', height: '80%' }} 
               resizeMode="contain" 
+              onError={() => Alert.alert('Media unavailable', 'This image could not be loaded. Check your connection or sign in again.')}
             />
           )}
         </View>

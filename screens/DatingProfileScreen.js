@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Image, TouchableOpacity, Alert, ScrollView, Act
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { Camera, ShieldCheck, Trash2, X } from 'lucide-react-native';
-import { apiRequest, getAuthToken, API_BASE } from '../lib/api';
+import { apiRequest, getAuthToken, API_BASE, getAuthenticatedMediaSource } from '../lib/api';
 import { useTheme } from '../lib/theme';
 
 export default function DatingProfileScreen({ navigation }) {
@@ -62,30 +62,47 @@ export default function DatingProfileScreen({ navigation }) {
     if (photos.length >= 6) return Alert.alert('Limit reached', 'You can only upload 6 photos.');
     setUploadingPhoto(true);
     
+    let uriToUpload = asset.uri;
+    if (Platform.OS === 'ios' && uriToUpload.startsWith('file://')) {
+      uriToUpload = uriToUpload.replace('file://', '/private');
+    }
+
     const formData = new FormData();
     formData.append('photo', {
-      uri: Platform.OS === 'ios' && !asset.uri.startsWith('file://') ? `file://${asset.uri}` : asset.uri,
+      uri: uriToUpload,
       name: 'photo.jpg',
       type: 'image/jpeg'
     });
 
-    try {
-      const res = await fetch(`${API_BASE}/dating_photo_upload.php`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-        body: formData,
-      });
-      const data = await res.json();
-      if (data.success) {
-        await fetchProfile();
-      } else {
-        Alert.alert('Error', data.error || 'Failed to upload photo.');
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Network error during upload.');
-    } finally {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/dating_photo_upload.php`);
+    xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+    xhr.setRequestHeader('Accept', 'application/json');
+
+    xhr.onload = async () => {
       setUploadingPhoto(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            await fetchProfile();
+          } else {
+            Alert.alert('Error', data.error || 'Failed to upload photo.');
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Invalid response.');
+        }
+      } else {
+        Alert.alert('Error', `Server status: ${xhr.status}`);
+      }
+    };
+
+    xhr.onerror = () => {
+      setUploadingPhoto(false);
+      Alert.alert('Error', 'Network error during upload.');
+    };
+
+    xhr.send(formData);
   };
 
   const deletePhoto = async (id) => {
@@ -123,35 +140,51 @@ export default function DatingProfileScreen({ navigation }) {
     
     setSubmittingVerify(true);
 
+    let uriToUpload = selfie.uri;
+    if (Platform.OS === 'ios' && uriToUpload.startsWith('file://')) {
+      uriToUpload = uriToUpload.replace('file://', '/private');
+    }
+
     const formData = new FormData();
     formData.append('code', verifyCode);
     formData.append('selfie', {
-      uri: Platform.OS === 'ios' && !selfie.uri.startsWith('file://') ? `file://${selfie.uri}` : selfie.uri,
+      uri: uriToUpload,
       name: 'selfie.jpg',
       type: 'image/jpeg'
     });
 
-    try {
-      const res = await fetch(`${API_BASE}/dating_verify.php`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-        body: formData,
-      });
-      const data = await res.json();
-      
-      if (data.success) {
-        Alert.alert('Submitted', 'Your verification is pending review.');
-        setSelfie(null);
-        setVerifyCode('');
-        await fetchProfile();
-      } else {
-        Alert.alert('Error', data.error || 'Verification failed.');
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Network error during verification.');
-    } finally {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/dating_verify.php`);
+    xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+    xhr.setRequestHeader('Accept', 'application/json');
+
+    xhr.onload = async () => {
       setSubmittingVerify(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            Alert.alert('Submitted', 'Your verification is pending review.');
+            setSelfie(null);
+            setVerifyCode('');
+            await fetchProfile();
+          } else {
+            Alert.alert('Error', data.error || 'Verification failed.');
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Invalid response.');
+        }
+      } else {
+        Alert.alert('Error', `Server status: ${xhr.status}`);
+      }
+    };
+
+    xhr.onerror = () => {
+      setSubmittingVerify(false);
+      Alert.alert('Error', 'Network error during verification.');
+    };
+
+    xhr.send(formData);
   };
 
   const handleClose = () => {
@@ -191,7 +224,7 @@ export default function DatingProfileScreen({ navigation }) {
         <View style={styles.photoGrid}>
           {photos.map((p, index) => (
             <View key={p.id} style={styles.photoWrapper}>
-              <Image source={{ uri: `${API_BASE.replace(/\/api\/?$/, '')}/${p.url}` }} style={styles.photo} />
+              <Image source={getAuthenticatedMediaSource(`media.php?kind=dating_photo&id=${encodeURIComponent(p.id)}`)} style={styles.photo} />
               <TouchableOpacity style={styles.deleteBtn} onPress={() => deletePhoto(p.id)}>
                 <Trash2 color="#fff" size={14} />
               </TouchableOpacity>

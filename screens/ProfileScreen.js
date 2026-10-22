@@ -91,35 +91,50 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
       
       const compressedUri = await compressImage(asset.uri);
       
+      // iOS Path Fix
+      let uriToUpload = compressedUri;
+      if (Platform.OS === 'ios' && compressedUri.startsWith('file://')) {
+        uriToUpload = compressedUri.replace('file://', '/private');
+      }
+      
       const formData = new FormData();
       formData.append('avatar', { 
-        uri: compressedUri, 
+        uri: uriToUpload, 
         name: 'avatar.jpg', 
         type: 'image/jpeg' 
       });
 
-      try {
-        const response = await fetch(`${API_BASE}/profile_update.php`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${getAuthToken()}`,
-            'Accept': 'application/json',
-          },
-          body: formData,
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-          fetchProfile(); 
-          Alert.alert('Success', 'Profile picture updated!');
-        } else {
-          Alert.alert('Error', data.error || 'Could not update picture.');
-        }
-      } catch (error) {
-        Alert.alert('Error', 'Network error while uploading.');
-      } finally {
+      // Use XMLHttpRequest instead of fetch
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_BASE}/profile_update.php`);
+      xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+      xhr.setRequestHeader('Accept', 'application/json');
+
+      xhr.onload = () => {
         setUploadingAvatar(false);
-      }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data.success) {
+              fetchProfile(); 
+              Alert.alert('Success', 'Profile picture updated!');
+            } else {
+              Alert.alert('Error', data.error || 'Could not update picture.');
+            }
+          } catch (e) {
+            Alert.alert('Error', 'Invalid response.');
+          }
+        } else {
+          Alert.alert('Error', `Server responded with status ${xhr.status}`);
+        }
+      };
+
+      xhr.onerror = () => {
+        setUploadingAvatar(false);
+        Alert.alert('Error', 'Network error while uploading.');
+      };
+
+      xhr.send(formData);
     }
   };
 

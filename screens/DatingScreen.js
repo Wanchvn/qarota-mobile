@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient'; // <-- Make sure to install this
-import { apiRequest, MEDIA_BASE } from '../lib/api';
+import { apiRequest, MEDIA_BASE, getAuthenticatedMediaSource } from '../lib/api';
 import { ShieldCheck, Settings, Heart, X, RotateCcw } from 'lucide-react-native'; 
 import { useTheme } from '../lib/theme';
 
@@ -22,6 +22,13 @@ export default function DatingScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
   const [matchData, setMatchData] = useState(null);
   const position = useRef(new Animated.ValueXY()).current;
+  const getCandidateImageSource = (profile) => {
+    if (profile?.primary_photo_id) {
+      return getAuthenticatedMediaSource(`media.php?kind=dating_photo&id=${encodeURIComponent(profile.primary_photo_id)}`);
+    }
+    if (!profile?.avatar) return null;
+    return { uri: profile.avatar.startsWith('http') ? profile.avatar : `${MEDIA_BASE}/${profile.avatar}` };
+  };
 
   const fetchNext = async (isInitial = false) => {
     if (isInitial) setLoading(true);
@@ -40,6 +47,9 @@ export default function DatingScreen({ navigation }) {
       } else {
         setCandidate(null);
         setNextCandidate(null);
+        if (!res.success && res.error) {
+          Alert.alert('Dating unavailable', res.error);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -175,7 +185,7 @@ export default function DatingScreen({ navigation }) {
           {nextCandidate && (
             <Animated.View style={[styles.card, { transform: [{ scale: nextCardScale }], backgroundColor: theme.surface }]}>
                <Image 
-                source={{ uri: nextCandidate.primary_photo ? `${MEDIA_BASE}/${nextCandidate.primary_photo}` : `${MEDIA_BASE}/${nextCandidate.avatar}` }} 
+                source={getCandidateImageSource(nextCandidate)}
                 style={styles.image} 
               />
             </Animated.View>
@@ -202,10 +212,7 @@ export default function DatingScreen({ navigation }) {
 
             {/* Candidate Image */}
             <Image 
-              source={{ uri: candidate.primary_photo 
-                ? `${MEDIA_BASE}/${candidate.primary_photo}` 
-                : `${MEDIA_BASE}/${candidate.avatar}` 
-              }} 
+              source={getCandidateImageSource(candidate)}
               style={styles.image} 
             />
 

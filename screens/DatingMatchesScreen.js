@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, Image, TouchableOpacity, 
-  ActivityIndicator, RefreshControl 
+  ActivityIndicator, RefreshControl, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, Heart, MessageCircle } from 'lucide-react-native';
-import { apiRequest, MEDIA_BASE } from '../lib/api';
+import { apiRequest, MEDIA_BASE, getAuthenticatedMediaSource } from '../lib/api';
 import { useTheme } from '../lib/theme';
 
 export default function DatingMatchesScreen({ navigation }) {
@@ -13,6 +13,7 @@ export default function DatingMatchesScreen({ navigation }) {
   const [matches, setMatches] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const latestRequest = useRef(0);
 
   const getMediaUrl = (path) => {
     if (!path) return null;
@@ -20,27 +21,42 @@ export default function DatingMatchesScreen({ navigation }) {
     return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
   };
 
-  const fetchMatches = async () => {
+  const fetchMatches = useCallback(async (isRefresh = false) => {
+    const requestId = ++latestRequest.current;
+    if (isRefresh) setRefreshing(true);
     try {
       const res = await apiRequest('get_dating_matches.php');
+      if (requestId !== latestRequest.current) return;
       if (res.success) {
         setMatches(res.matches || []);
+      } else {
+        Alert.alert('Could not load matches', res.error || 'Please try again.');
       }
     } catch (e) {
       console.error(e);
+      if (requestId === latestRequest.current) {
+        Alert.alert('Could not load matches', 'Please check your connection and try again.');
+      }
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === latestRequest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  };
-
-  useEffect(() => {
-    fetchMatches();
   }, []);
 
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', () => {
+      fetchMatches(true);
+    });
+    if (navigation.isFocused()) {
+      fetchMatches();
+    }
+    return unsubscribe;
+  }, [fetchMatches, navigation]);
+
   const onRefresh = () => {
-    setRefreshing(true);
-    fetchMatches();
+    fetchMatches(true);
   };
 
   const renderItem = ({ item }) => (
@@ -49,8 +65,10 @@ export default function DatingMatchesScreen({ navigation }) {
       onPress={() => navigation.navigate('Chat', { id: item.conversation_id, name: item.name, avatar: item.avatar })}
     >
       <View style={styles.imageContainer}>
-        {item.primary_photo || item.avatar ? (
-          <Image source={{ uri: getMediaUrl(item.primary_photo || item.avatar) }} style={styles.image} />
+        {item.primary_photo_id || item.avatar ? (
+          <Image source={item.primary_photo_id
+            ? getAuthenticatedMediaSource(`media.php?kind=dating_photo&id=${encodeURIComponent(item.primary_photo_id)}`)
+            : { uri: getMediaUrl(item.avatar) }} style={styles.image} />
         ) : (
           <View style={[styles.placeholderImage, { backgroundColor: theme.primary }]}>
             <Text style={styles.placeholderText}>{item.name.charAt(0)}</Text>
@@ -100,7 +118,7 @@ export default function DatingMatchesScreen({ navigation }) {
               <Heart color={theme.border} size={64} style={{ marginBottom: 16 }} />
               <Text style={{ color: theme.text, fontSize: 20, fontWeight: '700' }}>No matches yet</Text>
               <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 8 }}>
-                Keep swiping on the Dating tab to find your first match!
+                A match appears here when you and another person like each other. Keep swiping to meet someone new!
               </Text>
             </View>
           }

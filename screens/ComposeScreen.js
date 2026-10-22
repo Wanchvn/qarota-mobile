@@ -190,40 +190,62 @@ export default function ComposeScreen({ onClose, onPosted }) {
       formData.append('topic_id', selectedTopic.toString());
     }
 
+    // Helper for iOS file paths
+    const getUri = (uri) => {
+      if (Platform.OS === 'ios' && uri.startsWith('file://')) {
+        return uri.replace('file://', '/private');
+      }
+      return uri;
+    };
+
     if (image) {
       const compressedUri = await compressImage(image.uri);
-      formData.append('image', { uri: compressedUri, name: 'post_image.jpg', type: 'image/jpeg' });
+      formData.append('image', { uri: getUri(compressedUri), name: 'post_image.jpg', type: 'image/jpeg' });
     } else if (video) {
       endpoint = 'post_video.php';
       formData.append('duration', String(video.duration ? Math.round(video.duration) : 0));
       const videoUri = Platform.OS === 'ios' && !video.uri.startsWith('file://') ? `file://${video.uri}` : video.uri;
-      formData.append('video', { uri: videoUri, name: 'video.mp4', type: 'video/mp4' });
+      formData.append('video', { uri: getUri(videoUri), name: 'video.mp4', type: 'video/mp4' });
     } else if (voiceUri) {
       endpoint = 'post_voice.php';
       formData.append('duration', String(recordDuration));
       const audioUri = Platform.OS === 'ios' && !voiceUri.startsWith('file://') ? `file://${voiceUri}` : voiceUri;
-      formData.append('voice', { uri: audioUri, name: 'voice.m4a', type: 'audio/m4a' });
+      formData.append('voice', { uri: getUri(audioUri), name: 'voice.m4a', type: 'audio/m4a' });
     }
 
-    try {
-      const response = await fetch(`${API_BASE}/${endpoint}`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${getAuthToken()}`, 'Accept': 'application/json' },
-        body: formData,
-      });
-      const data = await response.json();
-      if (data.success) {
-        await AsyncStorage.removeItem(DRAFT_KEY); // <-- CLEAR DRAFT ON SUCCESS
-        onPosted();
+    // Use XMLHttpRequest instead of fetch
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/${endpoint}`);
+    xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+    xhr.setRequestHeader('Accept', 'application/json');
+    // Do NOT set Content-Type manually, XHR handles it with boundaries
+
+    xhr.onload = async () => {
+      setLoading(false);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            await AsyncStorage.removeItem(DRAFT_KEY);
+            onPosted();
+          } else {
+            Alert.alert('Error', data.error || 'Upload failed');
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Invalid response from server.');
+        }
       } else {
-        Alert.alert('Error', data.error || 'Upload failed');
+        Alert.alert('Upload Error', `Server responded with status ${xhr.status}`);
       }
-    } catch (err) {
-      Alert.alert('Error', 'Network error.');
-    }
-    setLoading(false);
-  };
+    };
 
+    xhr.onerror = () => {
+      setLoading(false);
+      Alert.alert('Error', 'Network error during upload.');
+    };
+
+    xhr.send(formData);
+  };
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

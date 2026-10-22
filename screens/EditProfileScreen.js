@@ -153,37 +153,48 @@ export default function EditProfileScreen({ navigation }) {
 
     // Append avatar if changed
     if (newAvatar) {
-      const filename = newAvatar.uri.split('/').pop();
+      let uriToUpload = newAvatar.uri;
+      if (Platform.OS === 'ios' && uriToUpload.startsWith('file://')) {
+        uriToUpload = uriToUpload.replace('file://', '/private');
+      }
+      
+      const filename = uriToUpload.split('/').pop();
       const match = /\.(\w+)$/.exec(filename);
       const type = match ? `image/${match[1]}` : `image/jpeg`;
-      uploadData.append('avatar', { uri: newAvatar.uri, name: filename, type });
+      uploadData.append('avatar', { uri: uriToUpload, name: filename, type });
     }
 
-    try {
-      // Use your actual API endpoint here
-      const response = await fetch(`${API_BASE}/edit_profile.php`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${getAuthToken()}`,
-          'Accept': 'application/json',
-          // Note: Don't set Content-Type manually for FormData, fetch does it automatically with boundaries
-        },
-        body: uploadData,
-      });
-      
-      const data = await response.json();
+    // --- REPLACED FETCH WITH XMLHTTPREQUEST ---
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_BASE}/edit_profile.php`);
+    xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
+    xhr.setRequestHeader('Accept', 'application/json');
 
-      if (data.success) {
-        Alert.alert('Success', 'Profile updated successfully.');
-        navigation.goBack();
-      } else {
-        Alert.alert('Error', data.error || 'Could not update profile.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Network error while saving.');
-    } finally {
+    xhr.onload = () => {
       setSaving(false);
-    }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.success) {
+            Alert.alert('Success', 'Profile updated successfully.');
+            navigation.goBack();
+          } else {
+            Alert.alert('Error', data.error || 'Could not update profile.');
+          }
+        } catch (e) {
+          Alert.alert('Error', 'Invalid response from server.');
+        }
+      } else {
+        Alert.alert('Error', `Server responded with status ${xhr.status}`);
+      }
+    };
+
+    xhr.onerror = () => {
+      setSaving(false);
+      Alert.alert('Error', 'Network error while saving.');
+    };
+
+    xhr.send(uploadData);
   };
 
   if (loading) return <View style={[styles.center, { backgroundColor: theme.background }]}><ActivityIndicator color={theme.primary} /></View>;

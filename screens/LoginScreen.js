@@ -34,15 +34,15 @@ export default function LoginScreen({ navigation, onLogin }) {
 
     setLoading(false);
 
-    if (res.success && res.token) {
+    // FIXED: Check for 2FA FIRST to prevent any security bypass
+    if (res.success && res.requires_2fa) {
+      // 2FA is required! Navigate to the verification screen
+      navigation.navigate('TwoFactorVerify', { userId: res.user_id });
+    } else if (res.success && res.token) {
       // Normal Login Success
       await SecureStore.setItemAsync('qarota_token', res.token);
       setAuthToken(res.token);
       onLogin();
-    } else if (res.success && res.requires_2fa) {
-      // 2FA is required! Navigate to the verification screen
-      // We pass the user_id from the backend to the next screen
-      navigation.navigate('TwoFactorVerify', { userId: res.user_id });
     } else {
       // Login Failed
       Alert.alert('Login failed', res.error || 'Please check your details.');

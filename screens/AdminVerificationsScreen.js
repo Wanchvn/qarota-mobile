@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, ShieldCheck, Heart, CheckCircle, XCircle } from 'lucide-react-native';
-import { apiRequest, MEDIA_BASE } from '../lib/api';
+import { apiRequest, getAuthToken, MEDIA_BASE, getAuthenticatedMediaSource } from '../lib/api';
 import { useTheme } from '../lib/theme';
 
 export default function AdminVerificationsScreen({ route, navigation }) {
@@ -95,7 +95,13 @@ export default function AdminVerificationsScreen({ route, navigation }) {
                 Code: <Text style={{ fontWeight: 'bold', color: theme.primary }}>{item.code || 'N/A'}</Text>
               </Text>
               {item.selfie_url && (
-                <Image source={{ uri: getMediaUrl(item.selfie_url) }} style={styles.imagePreview} />
+                <Image
+                  source={{
+                    uri: getMediaUrl(item.selfie_url),
+                    headers: { Authorization: `Bearer ${getAuthToken()}` },
+                  }}
+                  style={styles.imagePreview}
+                />
               )}
             </>
           ) : (
@@ -127,13 +133,13 @@ export default function AdminVerificationsScreen({ route, navigation }) {
                 {item.id_front_path && (
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 4 }}>ID Front</Text>
-                    <Image source={{ uri: getMediaUrl(item.id_front_path) }} style={styles.idImage} />
+                    <Image source={getAuthenticatedMediaSource(`media.php?kind=verification&id=${encodeURIComponent(item.id)}&slot=front`)} style={styles.idImage} />
                   </View>
                 )}
                 {item.id_back_path && (
                   <View style={{ flex: 1 }}>
                     <Text style={{ color: theme.textMuted, fontSize: 12, marginBottom: 4 }}>ID Back</Text>
-                    <Image source={{ uri: getMediaUrl(item.id_back_path) }} style={styles.idImage} />
+                    <Image source={getAuthenticatedMediaSource(`media.php?kind=verification&id=${encodeURIComponent(item.id)}&slot=back`)} style={styles.idImage} />
                   </View>
                 )}
               </View>
