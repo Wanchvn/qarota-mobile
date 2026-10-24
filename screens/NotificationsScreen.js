@@ -4,15 +4,15 @@ import {
   TouchableOpacity, RefreshControl 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Heart, MessageCircle, UserPlus, BellRing, AtSign } from 'lucide-react-native';
+import { Heart, MessageCircle, UserPlus, BellRing, AtSign, MessageSquare, Users } from 'lucide-react-native'; // <-- Added MessageSquare & Users
 import { apiRequest, MEDIA_BASE } from '../lib/api';
 import { useTheme } from '../lib/theme';
-import { useAppContext } from '../lib/AppContext'; // <-- ADDED
+import { useAppContext } from '../lib/AppContext'; 
 import { timeAgo } from '../lib/timeAgo';
 
 export default function NotificationsScreen({ navigation }) {
   const theme = useTheme();
-  const { fetchCounts } = useAppContext(); // <-- ADDED
+  const { fetchCounts } = useAppContext(); 
   
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -24,13 +24,10 @@ export default function NotificationsScreen({ navigation }) {
     return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
   };
 
-    const fetchNotifications = async () => {
+  const fetchNotifications = async () => {
     try {
       const res = await apiRequest('notifications.php');
       
-      // DEBUG LOG
-      console.log("NOTIFICATIONS API RESPONSE:", res);
-
       if (res.success) {
         setNotifications(res.notifications);
         await apiRequest('mark_notifications_read.php', { method: 'POST' });
@@ -57,9 +54,10 @@ export default function NotificationsScreen({ navigation }) {
   };
 
   const handleNotificationPress = (item) => {
-    if (item.type === 'follow') {
+    if (item.type === 'follow' || item.type === 'friendship') {
       navigation.push('Profile', { username: item.actor.username });
     } else if (item.post_id) {
+      // This handles 'like', 'comment', and 'reply' (since they all have post_id)
       navigation.push('PostDetail', { postId: item.post_id });
     } else {
       navigation.push('Profile', { username: item.actor.username });
@@ -70,7 +68,9 @@ export default function NotificationsScreen({ navigation }) {
     switch (type) {
       case 'like': return { icon: <Heart size={14} color="#fff" fill="#fff" />, color: '#E53935' }; 
       case 'comment': return { icon: <MessageCircle size={14} color="#fff" fill="#fff" />, color: '#1E88E5' };
+      case 'reply': return { icon: <MessageSquare size={14} color="#fff" fill="#fff" />, color: '#FB8C00' }; // Orange for replies
       case 'follow': return { icon: <UserPlus size={14} color="#fff" />, color: '#43A047' };
+      case 'friendship': return { icon: <Users size={14} color="#fff" />, color: '#8E24AA' }; // Purple for friends
       case 'mention': return { icon: <AtSign size={14} color="#fff" />, color: '#8E24AA' };
       default: return { icon: <BellRing size={14} color="#fff" />, color: theme.primary };
     }
@@ -80,7 +80,9 @@ export default function NotificationsScreen({ navigation }) {
     switch (type) {
       case 'like': return 'liked your post';
       case 'comment': return 'commented on your post';
+      case 'reply': return 'replied to your comment'; // NEW
       case 'follow': return 'started following you';
+      case 'friendship': return 'and you are now friends! 🎉'; // NEW
       case 'mention': return 'mentioned you';
       default: return 'interacted with you';
     }

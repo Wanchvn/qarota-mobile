@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync } from 'expo-audio';
-import AsyncStorage from '@react-native-async-storage/async-storage'; // <-- ADDED
+import AsyncStorage from '@react-native-async-storage/async-storage'; 
 import { Camera, Video as VideoIcon, Mic, X, Play, Globe, Users, Lock, Hash } from 'lucide-react-native'; 
 import { apiRequest, getAuthToken, API_BASE } from '../lib/api';
 import { compressImage } from '../lib/imageUtils'; 
@@ -31,12 +31,12 @@ export default function ComposeScreen({ onClose, onPosted }) {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const timerRef = useRef(null);
 
-  // --- NEW: LOAD DRAFT ON MOUNT ---
+  // LOAD DRAFT ON MOUNT
   useEffect(() => {
     const loadDraft = async () => {
       try {
         const savedDraft = await AsyncStorage.getItem(DRAFT_KEY);
-        if (savedDraft && !content) { // Only load if we don't already have text
+        if (savedDraft && !content) {
           setContent(savedDraft);
         }
       } catch (e) {
@@ -46,7 +46,7 @@ export default function ComposeScreen({ onClose, onPosted }) {
     loadDraft();
   }, []);
 
-  // --- NEW: SAVE DRAFT AS USER TYPES ---
+  // SAVE DRAFT AS USER TYPES
   useEffect(() => {
     const saveDraft = async () => {
       try {
@@ -60,7 +60,6 @@ export default function ComposeScreen({ onClose, onPosted }) {
       }
     };
     
-    // Debounce the save so it doesn't write to disk on every single keystroke
     const timeoutId = setTimeout(saveDraft, 500);
     return () => clearTimeout(timeoutId);
   }, [content]);
@@ -101,7 +100,7 @@ export default function ComposeScreen({ onClose, onPosted }) {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
-        allowsEditing: true,
+        allowsEditing: false, // <--- FIXED: No longer forces crop
         quality: 1,
       });
 
@@ -122,7 +121,7 @@ export default function ComposeScreen({ onClose, onPosted }) {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['videos'],
-        allowsEditing: true,
+        allowsEditing: false, // <--- FIXED: No longer forces trim
         quality: 0.8,
         videoMaxDuration: 60,
       });
@@ -246,12 +245,12 @@ export default function ComposeScreen({ onClose, onPosted }) {
 
     xhr.send(formData);
   };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
-          {/* UPDATED: Use handleDiscard for Cancel button */}
           <TouchableOpacity onPress={handleDiscard} disabled={loading}>
             <Text style={[styles.cancelBtn, { color: theme.textMuted }]}>Cancel</Text>
           </TouchableOpacity>

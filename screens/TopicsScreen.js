@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, RefreshControl, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { apiRequest } from '../lib/api';
+import { Plus } from 'lucide-react-native';
 
 export default function TopicsScreen({ navigation }) {
   const [topics, setTopics] = useState([]);
@@ -9,15 +10,35 @@ export default function TopicsScreen({ navigation }) {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchTopics = async () => {
-    const res = await apiRequest('topics.php');
-    if (res.success) setTopics(res.topics);
-    setLoading(false);
-    setRefreshing(false);
+    try {
+      const res = await apiRequest('topics.php');
+      if (res.success) setTopics(res.topics);
+      else Alert.alert('Error', res.error || 'Could not load topics.');
+    } catch (error) {
+      Alert.alert('Error', 'Could not load topics. Check your connection and try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   };
 
-  useEffect(() => {
-    fetchTopics();
-  }, []);
+  const toggleMembership = async (topic) => {
+    const result = await apiRequest('topic_toggle.php', {
+      method: 'POST',
+      json: { topic_name: topic.name },
+    });
+    if (!result.success) {
+      Alert.alert('Error', result.error || 'Could not update topic membership.');
+      return;
+    }
+    setTopics((current) => current.map((item) => (
+      item.id === topic.id
+        ? { ...item, is_member: result.state === 'joined', members: Math.max(0, item.members + (result.state === 'joined' ? 1 : -1)) }
+        : item
+    )));
+  };
+
+  useEffect(() => navigation.addListener('focus', fetchTopics), [navigation]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -32,6 +53,9 @@ export default function TopicsScreen({ navigation }) {
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Topics</Text>
+        <TouchableOpacity accessibilityLabel="Create topic" onPress={() => navigation.navigate('CreateTopic')}>
+          <Plus color="#fff" size={24} />
+        </TouchableOpacity>
       </View>
       <FlatList
         data={topics}
@@ -41,15 +65,16 @@ export default function TopicsScreen({ navigation }) {
         renderItem={({ item }) => (
           <View style={styles.card}>
             <View style={styles.cardHeader}>
-              <Text style={styles.topicName}>#{item.name}</Text>
+              <TouchableOpacity onPress={() => navigation.navigate('TopicDetail', { topicName: item.name })}>
+                <Text style={styles.topicName}>#{item.name}</Text>
+              </TouchableOpacity>
               <Text style={styles.memberCount}>{item.members} members</Text>
             </View>
             {item.description ? <Text style={styles.desc}>{item.description}</Text> : null}
             
             <TouchableOpacity 
               style={[styles.joinBtn, item.is_member && styles.joinedBtn]}
-              // Note: For now, we just display it. You can add the join API later.
-              onPress={() => alert(item.is_member ? 'You are already a member' : 'Joining topics is coming soon!')}
+              onPress={() => toggleMembership(item)}
             >
               <Text style={[styles.joinBtnText, item.is_member && styles.joinedBtnText]}>
                 {item.is_member ? 'Joined' : 'Join Topic'}

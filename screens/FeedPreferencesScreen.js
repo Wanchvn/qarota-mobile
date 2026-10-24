@@ -1,12 +1,32 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Users, Wifi, ShieldAlert } from 'lucide-react-native';
+import { ChevronLeft, Users, Wifi, ShieldAlert, Download } from 'lucide-react-native';
 import { apiRequest } from '../lib/api';
 import { useTheme } from '../lib/theme';
+import { useAppContext } from '../lib/AppContext';
+
+const SettingRow = ({ theme, icon, title, description, value, onToggle }) => (
+  <View style={[styles.row, { borderBottomColor: theme.border }]}>
+    <View style={[styles.iconContainer, { backgroundColor: theme.primary + '15' }]}>
+      {icon}
+    </View>
+    <View style={{ flex: 1, paddingRight: 16 }}>
+      <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
+      <Text style={[styles.description, { color: theme.textMuted }]}>{description}</Text>
+    </View>
+    <Switch
+      value={value}
+      onValueChange={onToggle}
+      trackColor={{ false: theme.border, true: theme.primary }}
+      thumbColor="#fff"
+    />
+  </View>
+);
 
 export default function FeedPreferencesScreen({ navigation }) {
   const theme = useTheme();
+  const { setLowDataMode } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -14,6 +34,7 @@ export default function FeedPreferencesScreen({ navigation }) {
     show_unfollowed: false,
     high_data: true,
     safe_mode: false,
+    low_data_mode: false,
   });
 
   useEffect(() => {
@@ -22,6 +43,7 @@ export default function FeedPreferencesScreen({ navigation }) {
         const res = await apiRequest('get_feed_preferences.php');
         if (res.success && res.settings) {
           setSettings(res.settings);
+          setLowDataMode(Boolean(res.settings.low_data_mode));
         }
       } catch (e) {
         console.error(e);
@@ -30,20 +52,23 @@ export default function FeedPreferencesScreen({ navigation }) {
       }
     };
     fetchSettings();
-  }, []);
+  }, [setLowDataMode]);
 
   const toggleSwitch = async (key) => {
+    const previousSettings = settings;
     const newSettings = { ...settings, [key]: !settings[key] };
     setSettings(newSettings);
     setSaving(true);
 
     try {
-      await apiRequest('update_feed_preferences.php', {
+      const res = await apiRequest('update_feed_preferences.php', {
         method: 'POST',
         json: newSettings
       });
-    } catch (e) {
-      setSettings(settings); // Revert on failure
+      if (!res.success) throw new Error(res.error || 'Preference update failed.');
+      if (key === 'low_data_mode') setLowDataMode(newSettings.low_data_mode);
+    } catch {
+      setSettings(previousSettings);
       Alert.alert('Error', 'Could not save preference.');
     } finally {
       setSaving(false);
@@ -53,24 +78,6 @@ export default function FeedPreferencesScreen({ navigation }) {
   if (loading) {
     return <View style={[styles.center, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
   }
-
-  const SettingRow = ({ icon, title, description, value, onToggle }) => (
-    <View style={[styles.row, { borderBottomColor: theme.border }]}>
-      <View style={[styles.iconContainer, { backgroundColor: theme.primary + '15' }]}>
-        {icon}
-      </View>
-      <View style={{ flex: 1, paddingRight: 16 }}>
-        <Text style={[styles.title, { color: theme.text }]}>{title}</Text>
-        <Text style={[styles.description, { color: theme.textMuted }]}>{description}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ false: theme.border, true: theme.primary }}
-        thumbColor="#fff"
-      />
-    </View>
-  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -86,7 +93,8 @@ export default function FeedPreferencesScreen({ navigation }) {
       </View>
 
       <ScrollView>
-        <SettingRow 
+        <SettingRow
+          theme={theme}
           icon={<Users color={theme.primary} size={22} />}
           title="Show Unfollowed Posts"
           description="Include public posts from people you don't follow in your feed. Turn this off for a strictly chronological feed."
@@ -94,7 +102,8 @@ export default function FeedPreferencesScreen({ navigation }) {
           onToggle={() => toggleSwitch('show_unfollowed')}
         />
 
-        <SettingRow 
+        <SettingRow
+          theme={theme}
           icon={<Wifi color={theme.primary} size={22} />}
           title="High Data Mode"
           description="Automatically load and play videos and high-resolution images in the feed. Turn off to save data."
@@ -102,7 +111,17 @@ export default function FeedPreferencesScreen({ navigation }) {
           onToggle={() => toggleSwitch('high_data')}
         />
 
-        <SettingRow 
+        <SettingRow
+          theme={theme}
+          icon={<Download color={theme.primary} size={22} />}
+          title="Low-data mode"
+          description="Require a tap to load feed images and videos. Avatars and voice notes remain available."
+          value={settings.low_data_mode}
+          onToggle={() => toggleSwitch('low_data_mode')}
+        />
+
+        <SettingRow
+          theme={theme}
           icon={<ShieldAlert color={theme.primary} size={22} />}
           title="Safe Mode"
           description="Hide posts that contain sensitive content or have been flagged by moderators."

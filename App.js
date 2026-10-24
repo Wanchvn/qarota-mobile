@@ -51,6 +51,10 @@ import TopicDetailScreen from './screens/TopicDetailScreen';
 import VerificationRequestScreen from './screens/VerificationRequestScreen';
 import ActiveSessionsScreen from './screens/ActiveSessionsScreen';
 import FeedPreferencesScreen from './screens/FeedPreferencesScreen';
+import CreateGroupScreen from './screens/CreateGroupScreen';
+import GroupDetailsScreen from './screens/GroupDetailsScreen';
+import CreateTopicScreen from './screens/CreateTopicScreen';
+import AppealScreen from './screens/AppealScreen';
 
 import TwoFactorSetupScreen from './screens/TwoFactorSetupScreen';
 import TwoFactorVerifyScreen from './screens/TwoFactorVerifyScreen';
@@ -121,10 +125,14 @@ export default function App() {
   const [hasOnboarded, setHasOnboarded] = useState(true);
   const theme = useTheme();
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setIsLoggedIn(false);
     setAuthToken(null);
-    SecureStore.deleteItemAsync('qarota_token').catch(() => {});
+    try {
+      await SecureStore.deleteItemAsync('qarota_token');
+    } catch (error) {
+      console.error('Could not clear the saved session:', error);
+    }
   };
 
   useEffect(() => {
@@ -176,7 +184,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <SafeAreaProvider>
-        <AppProvider>
+        <AppProvider key={isLoggedIn ? 'authenticated' : 'anonymous'}>
           <NavigationContainer theme={navTheme}>
             <Stack.Navigator 
               key={isLoggedIn ? 'loggedIn' : 'loggedOut'}
@@ -201,9 +209,14 @@ export default function App() {
                   <Stack.Screen name="EditProfile" component={EditProfileScreen} options={{ headerShown: false, presentation: 'modal' }} />
                   <Stack.Screen name="DatingProfile" component={DatingProfileScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="Chat" component={ChatScreen} />
-                  <Stack.Screen name="Profile" component={ProfileScreen} />
+                  <Stack.Screen name="CreateGroup" component={CreateGroupScreen} options={{ title: 'Create group' }} />
+                  <Stack.Screen name="GroupDetails" component={GroupDetailsScreen} />
+                  <Stack.Screen name="Profile">
+                    {(props) => <ProfileScreen {...props} onLogout={handleLogout} />}
+                  </Stack.Screen>
                   <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="Topics" component={TopicsScreen} options={{ headerShown: false }} />
+                  <Stack.Screen name="CreateTopic" component={CreateTopicScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="Discover" component={DiscoverScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="SavedPosts" component={SavedPostsScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="Settings" component={SettingsScreen} options={{ headerShown: false }} />
@@ -239,14 +252,15 @@ export default function App() {
                   <Stack.Screen name="Login" options={{ headerShown: false }}>
                     {(props) => <LoginScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
                   </Stack.Screen>
-                  <Stack.Screen name="Register" options={{ headerShown: false }}>
-                    {(props) => <RegisterScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
-                  </Stack.Screen>
+                  <Stack.Screen name="Register" component={RegisterScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} options={{ headerShown: false }} />
                   <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} options={{ headerShown: false }} />
                   
                   <Stack.Screen name="TwoFactorVerify" options={{ headerShown: false }}>
                     {(props) => <TwoFactorVerifyScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
+                  </Stack.Screen>
+                  <Stack.Screen name="Appeal" options={{ headerShown: false }}>
+                    {(props) => <AppealScreen {...props} onLogin={() => setIsLoggedIn(true)} />}
                   </Stack.Screen>
                 </React.Fragment>
               )}

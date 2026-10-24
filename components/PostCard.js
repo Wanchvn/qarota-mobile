@@ -6,21 +6,47 @@ import {
   View, Text, StyleSheet, TouchableOpacity, Alert, Modal, 
   useWindowDimensions, Share, Dimensions, Pressable, ActivityIndicator 
 } from 'react-native';
-import { Image } from 'expo-image'; // <-- ADDED THIS
+import { Image } from 'expo-image'; 
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { 
-  Heart, MessageCircle, MoreHorizontal, Mic, Play, Bookmark, Share2, X, Download, Flag, Trash2, Pencil 
-} from 'lucide-react-native'; 
+  Heart, MessageCircle, MoreHorizontal, Mic, Play, Pause, Bookmark, Share2, X, Download, Flag, Trash2, Pencil, BadgeCheck 
+} from 'lucide-react-native'; // <-- Added Pause
 import { timeAgo } from '../lib/timeAgo';
 import { apiRequest, MEDIA_BASE, getAuthenticatedMediaSource, getAuthToken } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import LikesModal from './LikesModal'; 
+import { useAppContext } from '../lib/AppContext';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-export default function PostCard({ post, isVisible, onLike, onComment, onProfilePress, onDelete, onTopicPress, onEdit, isMine, navigation }) {
+function PostVideo({ source, isVisible, onError }) {
+  const player = useVideoPlayer(source, (videoPlayer) => {
+    videoPlayer.loop = true;
+    videoPlayer.muted = true;
+  });
+  useEffect(() => {
+    const subscription = player.addListener('statusChange', ({ status }) => onError(status === 'error'));
+    return () => subscription.remove();
+  }, [onError, player]);
+  useEffect(() => {
+    if (isVisible) player.play();
+    else player.pause();
+  }, [isVisible, player]);
+  return (
+    <VideoView
+      style={{ width: '100%', height: '100%' }}
+      player={player}
+      allowsFullscreen
+      allowsPictureInPicture
+      nativeControls
+    />
+  );
+}
+
+export default function PostCard({ post, isVisible, onLike, onComment, onProfilePress, onDelete, onTopicPress, onEdit, onBookmarkChange, isMine, navigation }) {
   const theme = useTheme();
+  const { lowDataMode } = useAppContext();
   const [menuVisible, setMenuVisible] = useState(false);
   const [imageModalVisible, setImageModalVisible] = useState(false); 
   const [likesModalVisible, setLikesModalVisible] = useState(false); 
@@ -28,6 +54,7 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
   const [isSaving, setIsSaving] = useState(false); 
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [videoLoadFailed, setVideoLoadFailed] = useState(false);
+  const [mediaRequested, setMediaRequested] = useState(false);
 
   const [isExpanded, setIsExpanded] = useState(false);
   const [showReadMore, setShowReadMore] = useState(false);
@@ -54,34 +81,6 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
     () => getAuthenticatedMediaSource(`media.php?kind=post&id=${encodeURIComponent(post.id)}`),
     [post.id, authToken]
   );
-  const videoSource = isVideo ? postMediaSource : null;
-  
-  const videoPlayer = useVideoPlayer(videoSource, player => {
-    player.loop = true;
-    player.muted = true;
-  });
-  useEffect(() => {
-    setImageLoadFailed(false);
-    setVideoLoadFailed(false);
-  }, [post.id]);
-
-  useEffect(() => {
-    const subscription = videoPlayer.addListener('statusChange', ({ status }) => {
-      setVideoLoadFailed(status === 'error');
-    });
-    return () => subscription.remove();
-  }, [videoPlayer]);
-
-  useEffect(() => {
-    if (videoSource && videoPlayer) {
-      if (isVisible) {
-        videoPlayer.play();
-      } else {
-        videoPlayer.pause();
-      }
-    }
-  }, [isVisible, videoSource, videoPlayer]);
-
   const audioSource = isVoice ? postMediaSource : null;
   const audioPlayer = useAudioPlayer(audioSource);
   const audioStatus = useAudioPlayerStatus(audioPlayer);
@@ -112,9 +111,14 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
     );
   };
 
-  const playAudio = () => {
+  // FIXED: Toggle Audio
+  const toggleAudio = () => {
     if (audioPlayer) {
-      audioPlayer.play();
+      if (audioStatus.playing) {
+        audioPlayer.pause();
+      } else {
+        audioPlayer.play();
+      }
     }
   };
 
@@ -131,6 +135,8 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       if (!res.success) {
         setIsBookmarked(!newState); 
         Alert.alert('Error', 'Could not save post.');
+      } else if (onBookmarkChange) {
+        onBookmarkChange(newState);
       }
     } catch (e) {
       setIsBookmarked(!newState);
@@ -203,8 +209,12 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
     }
   };
 
-  const handleImagePress = () => {
-    const now = Date.now();
+  const handleImagePress = (event) => {
+    if (lowDataMode && !mediaRequested) {
+      setMediaRequested(true);
+      return;
+    }
+    const now = event.nativeEvent.timestamp;
     const DOUBLE_PRESS_DELAY = 300;
     
     if (lastTap.current && (now - lastTap.current) < DOUBLE_PRESS_DELAY) {
@@ -245,10 +255,14 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
             </View>
           )}
           <View style={styles.headerText}>
-            <Text style={[styles.authorName, { color: theme.text }]}>
-              {post.author.name}
-              {post.author.is_verified && <Text style={styles.verifiedBadge}> ✓</Text>}
-            </Text>
+                         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Text style={[styles.authorName, { color: theme.text }]}>
+                {post.author.name}
+              </Text>
+              {post.author.is_verified && (
+                <BadgeCheck color="#E5A93D" size={16} style={{ marginLeft: 4 }} />
+              )}
+            </View>
             <Text style={[styles.time, { color: theme.textMuted }]}>
               {timeAgo(post.created_at)}
               {post.edited_at && <Text style={{ fontStyle: 'italic' }}> · Edited</Text>}
@@ -303,7 +317,11 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       {/* Image with Double Tap to Like */}
       {isImage && post.media_path ? (
         <Pressable onPress={handleImagePress} style={{ position: 'relative' }}>
-          {imageLoadFailed ? (
+          {lowDataMode !== false && !mediaRequested ? (
+            <View style={[styles.postImage, { height: mediaHeight, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.surface }]}>
+              <Text style={{ color: theme.textMuted }}>Tap to load image</Text>
+            </View>
+          ) : imageLoadFailed ? (
             <View style={[styles.postImage, { height: mediaHeight, justifyContent: 'center', alignItems: 'center' }]}>
               <Text style={{ color: theme.textMuted }}>Media unavailable. Check your connection or sign in again.</Text>
             </View>
@@ -326,35 +344,40 @@ export default function PostCard({ post, isVisible, onLike, onComment, onProfile
       ) : null}
 
       {/* Video */}
-      {videoSource ? (
+      {isVideo && (lowDataMode === false || mediaRequested) ? (
         <View style={[styles.postImage, { height: mediaHeight, overflow: 'hidden', position: 'relative' }]}>
           {videoLoadFailed ? (
             <Text style={{ color: theme.textMuted, textAlign: 'center', margin: 16 }}>
               Video unavailable. Check your connection or sign in again.
             </Text>
           ) : (
-            <VideoView
-              style={{ width: '100%', height: '100%' }}
-              player={videoPlayer}
-              allowsFullscreen
-              allowsPictureInPicture
-              nativeControls
-            />
+            <PostVideo source={postMediaSource} isVisible={lowDataMode === false && isVisible} onError={setVideoLoadFailed} />
           )}
         </View>
+      ) : isVideo ? (
+        <TouchableOpacity
+          style={[styles.postImage, { height: mediaHeight, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.surface }]}
+          onPress={() => setMediaRequested(true)}
+        >
+          <Text style={{ color: theme.textMuted }}>Tap to load video</Text>
+        </TouchableOpacity>
       ) : null}
 
-      {/* Voice Note */}
+      {/* Voice Note (FIXED TO TOGGLE AND CHANGE ICON) */}
       {isVoice && audioSource ? (
         <TouchableOpacity 
           style={[styles.voiceContainer, { backgroundColor: theme.background }]} 
-          onPress={playAudio}
+          onPress={toggleAudio}
         >
           <Mic color={theme.primary} size={20} style={{ marginRight: 12 }} />
           <Text style={{ color: theme.text, flex: 1, fontWeight: '600' }}>
             {audioStatus.error ? 'Voice note unavailable' : `Voice Note (${post.media_duration || 0}s)`}
           </Text>
-          <Play color={theme.primary} size={16} fill={theme.primary} />
+          {audioStatus.playing ? (
+            <Pause color={theme.primary} size={16} fill={theme.primary} />
+          ) : (
+            <Play color={theme.primary} size={16} fill={theme.primary} />
+          )}
         </TouchableOpacity>
       ) : null}
 

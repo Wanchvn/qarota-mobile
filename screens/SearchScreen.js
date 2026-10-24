@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, Text, StyleSheet, TextInput, SectionList, Image, 
-  TouchableOpacity, ActivityIndicator, Keyboard 
+  View, Text, StyleSheet, TextInput, SectionList, 
+  TouchableOpacity, ActivityIndicator, Keyboard, ScrollView 
 } from 'react-native';
+import { Image } from 'expo-image'; 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Search as SearchIcon, X, Clock } from 'lucide-react-native';
+import { Search as SearchIcon, X, Clock, BadgeCheck } from 'lucide-react-native'; 
 import { apiRequest, MEDIA_BASE } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import PostCard from '../components/PostCard';
@@ -20,7 +21,6 @@ export default function SearchScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [activePostId, setActivePostId] = useState(null);
   
-  // New state for suggestions and recent searches
   const [recentSearches, setRecentSearches] = useState([]);
   const [suggestedUsers, setSuggestedUsers] = useState([]);
 
@@ -30,7 +30,12 @@ export default function SearchScreen({ navigation }) {
     return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
   };
 
-  // 1. Load recent searches and suggested users on mount
+  // Safe helper to get the first letter
+  const getInitial = (name, username) => {
+    const display = name || username || 'U';
+    return display.charAt(0).toUpperCase();
+  };
+
   useEffect(() => {
     const loadInitialData = async () => {
       try {
@@ -46,7 +51,6 @@ export default function SearchScreen({ navigation }) {
     loadInitialData();
   }, []);
 
-  // 2. Handle the actual search typing
   useEffect(() => {
     if (query.length < 2) {
       setResults({ users: [], posts: [] });
@@ -65,7 +69,6 @@ export default function SearchScreen({ navigation }) {
     return () => clearTimeout(delayDebounceFn);
   }, [query]);
 
-  // 3. Save search when a user taps the keyboard "Search" button or a result
   const saveSearchQuery = async (text) => {
     if (!text.trim() || text.length < 2) return;
     try {
@@ -114,23 +117,76 @@ export default function SearchScreen({ navigation }) {
         </View>
       </View>
 
-      {/* LOADING STATE */}
       {loading && <ActivityIndicator style={{ marginTop: 20 }} color={theme.primary} />}
 
-      {/* NO RESULTS STATE */}
-      {query.length >= 2 && !loading && sections.length === 0 && (
-        <Text style={[styles.empty, { color: theme.textMuted }]}>No results found for "{query}"</Text>
-      )}
-
-      {/* INITIAL STATE (No Query) - Recent & Suggested */}
-      {query.length < 2 && (
-        <View style={{ flex: 1, paddingTop: 16 }}>
+      {query.length >= 2 ? (
+        <>
+          {!loading && sections.length === 0 && (
+            <Text style={[styles.empty, { color: theme.textMuted }]}>No results found for "{query}"</Text>
+          )}
           
-          {/* Recent Searches */}
+          <SectionList
+            sections={sections}
+            keyExtractor={(item, index) => String(item.id || index)}
+            stickySectionHeadersEnabled={false}
+            keyboardShouldPersistTaps="handled"
+            renderSectionHeader={({ section: { title } }) => (
+              <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
+            )}
+            renderItem={({ item, section }) => {
+              if (section.type === 'user') {
+                return (
+                  <TouchableOpacity 
+                    style={[styles.userRow, { borderBottomColor: theme.border }]}
+                    onPress={() => {
+                      saveSearchQuery(item.username);
+                      Keyboard.dismiss();
+                      navigation.push('Profile', { username: item.username });
+                    }}
+                  >
+                    {item.avatar ? (
+                      <Image source={{ uri: getMediaUrl(item.avatar) }} style={styles.avatar} contentFit="cover" />
+                    ) : (
+                      <View style={[styles.avatarPlaceholder, { backgroundColor: theme.primary }]}>
+                        {/* FIXED: Safe charAt */}
+                        <Text style={styles.avatarText}>{getInitial(item.name, item.username)}</Text>
+                      </View>
+                    )}
+                    <View style={styles.info}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={[styles.name, { color: theme.text }]}>{item.name || item.username}</Text>
+                        {item.is_verified && <BadgeCheck color="#E5A93D" size={16} style={{ marginLeft: 4 }} />}
+                      </View>
+                      <Text style={[styles.username, { color: theme.textMuted }]}>@{item.username}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              }
+              
+              return (
+                <View style={{ paddingHorizontal: 16 }}>
+                  <PostCard 
+                    post={item} 
+                    navigation={navigation}
+                    onLike={() => handleLike(item.id)} 
+                    onComment={() => setActivePostId(item.id)} 
+                    onProfilePress={() => navigation.push('Profile', { username: item.author.username })}
+                    onDelete={() => {}}
+                    onTopicPress={(topic) => navigation.push('TopicDetail', { topicName: topic })}
+                    onEdit={() => {}} 
+                    isMine={item.is_mine}
+                  />
+                </View>
+              );
+            }}
+          />
+        </>
+      ) : (
+        <ScrollView style={{ flex: 1, paddingTop: 16 }} keyboardShouldPersistTaps="handled">
           {recentSearches.length > 0 && (
             <View style={{ marginBottom: 24, paddingHorizontal: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                <Text style={[styles.sectionTitle, { color: theme.text, marginHorizontal: 0 }]}>Recent</Text>
+                <Text style={[styles.sectionTitle, { color: theme.text, marginHorizontal: 0, marginTop: 0 }]}>Recent</Text>
                 <TouchableOpacity onPress={clearRecentSearches}>
                   <Text style={{ color: theme.primary, fontSize: 13, fontWeight: '600' }}>Clear</Text>
                 </TouchableOpacity>
@@ -150,7 +206,6 @@ export default function SearchScreen({ navigation }) {
             </View>
           )}
 
-          {/* Suggested Users */}
           {suggestedUsers.length > 0 && (
             <View style={{ paddingHorizontal: 16 }}>
               <Text style={[styles.sectionTitle, { color: theme.text, marginHorizontal: 0 }]}>Suggested for you</Text>
@@ -165,78 +220,23 @@ export default function SearchScreen({ navigation }) {
                   }}
                 >
                   {user.avatar ? (
-                    <Image source={{ uri: getMediaUrl(user.avatar) }} style={styles.avatar} />
+                    <Image source={{ uri: getMediaUrl(user.avatar) }} style={styles.avatar} contentFit="cover" />
                   ) : (
                     <View style={[styles.avatarPlaceholder, { backgroundColor: theme.primary }]}>
-                      <Text style={styles.avatarText}>{user.name.charAt(0)}</Text>
+                      {/* FIXED: Safe charAt */}
+                      <Text style={styles.avatarText}>{getInitial(user.name, user.username)}</Text>
                     </View>
                   )}
                   <View style={styles.info}>
-                    <Text style={[styles.name, { color: theme.text }]}>{user.name}</Text>
+                    <Text style={[styles.name, { color: theme.text }]}>{user.name || user.username}</Text>
                     <Text style={[styles.username, { color: theme.textMuted }]}>@{user.username}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
             </View>
           )}
-        </View>
+        </ScrollView>
       )}
-
-      {/* SEARCH RESULTS LIST */}
-      <SectionList
-        sections={sections}
-        keyExtractor={(item, index) => item.id.toString() + index}
-        stickySectionHeadersEnabled={false}
-        keyboardShouldPersistTaps="handled"
-        renderSectionHeader={({ section: { title } }) => (
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>{title}</Text>
-        )}
-        renderItem={({ item, section }) => {
-          if (section.type === 'user') {
-            return (
-              <TouchableOpacity 
-                style={[styles.userRow, { borderBottomColor: theme.border }]}
-                onPress={() => {
-                  saveSearchQuery(item.username);
-                  Keyboard.dismiss();
-                  navigation.push('Profile', { username: item.username });
-                }}
-              >
-                {item.avatar ? (
-                  <Image source={{ uri: getMediaUrl(item.avatar) }} style={styles.avatar} />
-                ) : (
-                  <View style={[styles.avatarPlaceholder, { backgroundColor: theme.primary }]}>
-                    <Text style={styles.avatarText}>{item.name.charAt(0)}</Text>
-                  </View>
-                )}
-                <View style={styles.info}>
-                  <Text style={[styles.name, { color: theme.text }]}>
-                    {item.name}
-                    {item.is_verified && <Text style={styles.verified}> ✓</Text>}
-                  </Text>
-                  <Text style={[styles.username, { color: theme.textMuted }]}>@{item.username}</Text>
-                </View>
-              </TouchableOpacity>
-            );
-          }
-          
-          return (
-            <View style={{ paddingHorizontal: 16 }}>
-              <PostCard 
-                post={item} 
-                navigation={navigation}
-                onLike={() => handleLike(item.id)} 
-                onComment={() => setActivePostId(item.id)} 
-                onProfilePress={() => navigation.push('Profile', { username: item.author.username })}
-                onDelete={() => {}}
-                onTopicPress={(topic) => navigation.push('TopicDetail', { topicName: topic })}
-                onEdit={() => {}} // Not editable from search
-                isMine={item.is_mine}
-              />
-            </View>
-          );
-        }}
-      />
 
       <CommentModal visible={!!activePostId} postId={activePostId} onClose={() => setActivePostId(null)} onCommentAdded={() => {}} />
     </SafeAreaView>
@@ -259,7 +259,6 @@ const styles = StyleSheet.create({
   avatarText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   info: { flex: 1 },
   name: { fontSize: 16, fontWeight: '700' },
-  verified: { color: '#4CAF50' },
   username: { fontSize: 14, marginTop: 2 },
   empty: { textAlign: 'center', marginTop: 40, fontSize: 16 },
 });

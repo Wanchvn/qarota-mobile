@@ -4,13 +4,16 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert, Modal 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Send, Camera, Mic, Play, Pause, Square, X } from 'lucide-react-native';
+import { Send, Camera, Mic, Play, Pause, Square, X, Users } from 'lucide-react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { useAudioRecorder, AudioModule, RecordingPresets, setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { apiRequest, getAuthToken, API_BASE, getAuthenticatedMediaSource } from '../lib/api';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import { useTheme } from '../lib/theme';
 import { timeAgo } from '../lib/timeAgo';
+import { useAppContext } from '../lib/AppContext';
+
+const MEDIA_BASE = API_BASE.replace('/api', '');
 
 // --- AUDIO PLAYER COMPONENT ---
 const AudioMessage = ({ messageId, isMine, theme }) => {
@@ -20,7 +23,7 @@ const AudioMessage = ({ messageId, isMine, theme }) => {
     [messageId, authToken]
   );
   const player = useAudioPlayer(source);
-  const status = useAudioPlayerStatus(player); // Tracks if it's playing or paused
+  const status = useAudioPlayerStatus(player);
 
   const handleTogglePlay = () => {
     try {
@@ -49,15 +52,26 @@ const AudioMessage = ({ messageId, isMine, theme }) => {
     </TouchableOpacity>
   );
 };
-// ------------------------------
-// -------------------------------------------------------------------
 
-const VideoMessage = ({ messageId }) => {
+// --- VIDEO MESSAGE COMPONENT ---
+const VideoMessage = ({ messageId, lowDataMode }) => {
   const authToken = getAuthToken();
   const source = useMemo(
     () => getAuthenticatedMediaSource(`media.php?kind=message&id=${encodeURIComponent(messageId)}`),
     [messageId, authToken]
   );
+  const [loaded, setLoaded] = useState(lowDataMode === false);
+  if (!loaded) {
+    return (
+      <TouchableOpacity onPress={() => setLoaded(true)} style={styles.loadVideoButton}>
+        <Text style={{ color: '#fff', fontWeight: '600' }}>Tap to load video</Text>
+      </TouchableOpacity>
+    );
+  }
+  return <LoadedVideoMessage source={source} />;
+};
+
+const LoadedVideoMessage = ({ source }) => {
   const player = useVideoPlayer(source);
   const [failed, setFailed] = useState(false);
 
@@ -83,8 +97,11 @@ const VideoMessage = ({ messageId }) => {
 };
 
 export default function ChatScreen({ route, navigation }) {
-  const { id, name } = route.params;
+  // Extract avatar and username from params
+  const { id, name, isGroup, avatar, username } = route.params || { id: null, name: 'Chat', isGroup: false, avatar: null, username: null }; 
+  
   const theme = useTheme();
+  const { lowDataMode } = useAppContext();
   const flatListRef = useRef();
 
   const [messages, setMessages] = useState([]);
@@ -92,16 +109,22 @@ export default function ChatScreen({ route, navigation }) {
   const [myId, setMyId] = useState(null);
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [messageError, setMessageError] = useState('');
   const [otherIsTyping, setOtherIsTyping] = useState(false);
   const typingTimeoutRef = useRef(null);
   const [uploadingMedia, setUploadingMedia] = useState(false);
   
-  // Image Viewer State
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerImage, setViewerImage] = useState(null);
 
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
+
+  const getMediaUrl = (path) => {
+    if (!path) return null;
+    if (path.startsWith('http')) return path;
+    return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
+  };
 
   const getMessageMediaSource = (message) => getAuthenticatedMediaSource(
     `media.php?kind=message&id=${encodeURIComponent(message.id)}`
@@ -114,9 +137,13 @@ export default function ChatScreen({ route, navigation }) {
         setMessages(res.messages);
         setMyId(res.me);
         setOtherIsTyping(res.is_typing);
+        setMessageError('');
+      } else {
+        setMessageError(res.error || 'Could not load messages.');
       }
     } catch (e) {
       console.error(e);
+      setMessageError('Network error. Could not load messages.');
     } finally {
       setLoading(false);
     }
@@ -130,14 +157,53 @@ export default function ChatScreen({ route, navigation }) {
     }
     prepareAudio();
 
-    navigation.setOptions({ title: name });
-    fetchMessages();
+    // CUSTOM CLICKABLE HEADER
+    navigation.setOptions({
+      headerTitle: () => (
+        <TouchableOpacity 
+          style={{ flexDirection: 'row', alignItems: 'center' }}
+          onPress={() => {
+            if (!isGroup && username) {
+              navigation.navigate('Profile', { username });
+            }
+          }}
+          disabled={isGroup || !username}
+        >
+          {!isGroup && avatar ? (
+            <Image 
+              source={{ uri: getMediaUrl(avatar) }} 
+              style={{ width: 34, height: 34, borderRadius: 17, marginRight: 10 }} 
+            />
+          ) : !isGroup && name ? (
+            <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: theme.primary, alignItems: 'center', justifyContent: 'center', marginRight: 10 }}>
+              <Text style={{ color: '#fff', fontWeight: 'bold' }}>{name.charAt(0)}</Text>
+            </View>
+          ) : null}
+          
+          <Text style={{ color: theme.headerText || '#fff', fontSize: 18, fontWeight: '700' }}>
+            {name || 'Chat'}
+          </Text>
+        </TouchableOpacity>
+      ),
+      headerRight: isGroup ? () => (
+        <TouchableOpacity
+          accessibilityLabel="Group details"
+          onPress={() => navigation.navigate('GroupDetails', { id, name })}
+          style={{ paddingHorizontal: 8 }}
+        >
+          <Users color={theme.headerText || '#fff'} size={22} />
+        </TouchableOpacity>
+      ) : undefined,
+    });
+    
+    const initialFetch = setTimeout(fetchMessages, 0);
     const interval = setInterval(fetchMessages, 3000);
     return () => {
+      clearTimeout(initialFetch);
       clearInterval(interval);
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [id]);
+  }, [id, isGroup, name, navigation, theme.headerText, avatar, username]);
 
   const handleTextChange = (val) => {
     setText(val);
@@ -286,15 +352,39 @@ export default function ChatScreen({ route, navigation }) {
           const res = await apiRequest('message_delete.php', { method: 'POST', json: { message_id: message.id } });
           if (res.success) {
             setMessages(prev => prev.map(m => m.id === message.id ? { ...m, body: 'Message deleted', is_deleted: true } : m));
+          } else {
+            Alert.alert('Could not delete message', res.error || 'Please try again.');
           }
       }}
     ]);
   };
 
+  const handleReact = (message) => {
+    if (message.is_deleted || (message.message_type || message.type) === 'system') return;
+    const emojis = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+    Alert.alert('React to message', 'Choose a reaction. Tap the same reaction again to remove it.', [
+      ...emojis.map((emoji) => ({
+        text: emoji,
+        onPress: async () => {
+          const result = await apiRequest('message_react.php', {
+            method: 'POST',
+            json: { message_id: message.id, emoji },
+          });
+          if (result.success) {
+            setMessages((current) => current.map((item) => (
+              item.id === message.id ? { ...item, reactions: result.reactions } : item
+            )));
+          } else {
+            Alert.alert('Reaction failed', result.error || 'Could not update the reaction.');
+          }
+        },
+      })),
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
   const renderMessage = ({ item }) => {
     const isMine = item.sender_id === myId;
-    const bubbleStyle = isMine ? [styles.bubble, styles.bubbleMine] : [styles.bubble, styles.bubbleTheirs];
-
     const msgType = item.message_type || item.type; 
     const mediaSource = !item.is_deleted && ['image', 'voice', 'video'].includes(msgType)
       ? getMessageMediaSource(item)
@@ -303,48 +393,95 @@ export default function ChatScreen({ route, navigation }) {
     const isVoice = msgType === 'voice' || (item.body && item.body.match(/\.(m4a|mp3|wav)$/i));
     const isVideo = msgType === 'video';
 
+    const senderAvatar = item.sender_avatar;
+    const senderName = item.sender_name || 'User';
+
     return (
-      <TouchableOpacity activeOpacity={0.8} onLongPress={() => handleLongPress(item)} style={bubbleStyle}>
+      <View style={[styles.messageRow, isMine ? styles.rowRight : styles.rowLeft]}>
         
-        {isImage && !item.is_deleted ? (
-          <TouchableOpacity onPress={() => {
-            setViewerImage(mediaSource);
-            setViewerVisible(true);
-          }}>
-            <Image
-              source={mediaSource}
-              style={styles.messageImage}
-              onError={() => Alert.alert('Media unavailable', 'This image could not be loaded. Check your connection or sign in again.')}
-            />
+        {/* Clickable Avatar for other user */}
+        {!isMine && (
+          <TouchableOpacity 
+            style={styles.avatarWrapper}
+            onPress={() => {
+              if (item.sender_username) {
+                navigation.navigate('Profile', { username: item.sender_username });
+              }
+            }}
+          >
+            {senderAvatar ? (
+              <Image source={{ uri: getMediaUrl(senderAvatar) }} style={styles.chatAvatar} />
+            ) : (
+              <View style={[styles.chatAvatarPlaceholder, { backgroundColor: theme.primary }]}>
+                <Text style={{ color: '#fff', fontSize: 12, fontWeight: 'bold' }}>{senderName.charAt(0)}</Text>
+              </View>
+            )}
           </TouchableOpacity>
-        ) : 
-        
-        isVoice && !item.is_deleted ? (
-          <AudioMessage 
-            messageId={item.id}
-            isMine={isMine} 
-            theme={theme} 
-          />
-        ) : 
-        
-        isVideo && !item.is_deleted ? (
-          <VideoMessage messageId={item.id} />
-        ) :
-
-        (
-          <Text style={[
-            styles.msgText, 
-            isMine ? styles.msgTextMine : { color: theme.text },
-            item.is_deleted && { fontStyle: 'italic', opacity: 0.7 }
-          ]}>
-            {item.body}
-          </Text>
         )}
+        
+        <TouchableOpacity 
+          activeOpacity={0.8} 
+          onLongPress={() => handleLongPress(item)} 
+          style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleTheirs]}
+        >
+          {isGroup && !isMine && msgType !== 'system' && item.sender_name ? (
+            <Text style={[styles.senderName, { color: theme.primary }]} numberOfLines={1}>
+              {item.sender_name}
+            </Text>
+          ) : null}
 
-        <Text style={[styles.time, isMine ? styles.timeMine : { color: theme.textMuted }]}>
-          {timeAgo(item.created_at)}
-        </Text>
-      </TouchableOpacity>
+          {isImage && !item.is_deleted ? (
+            <TouchableOpacity onPress={() => {
+              setViewerImage(mediaSource);
+              setViewerVisible(true);
+            }}>
+              <Image
+                source={mediaSource}
+                style={styles.messageImage}
+                onError={() => Alert.alert('Media unavailable', 'This image could not be loaded.')}
+              />
+            </TouchableOpacity>
+          ) : 
+          
+          isVoice && !item.is_deleted ? (
+            <AudioMessage messageId={item.id} isMine={isMine} theme={theme} />
+          ) : 
+          
+          isVideo && !item.is_deleted ? (
+            <VideoMessage key={`${item.id}-${lowDataMode}`} messageId={item.id} lowDataMode={lowDataMode} />
+          ) :
+
+          (
+            <Text style={[
+              styles.msgText, 
+              isMine ? styles.msgTextMine : { color: theme.text },
+              item.is_deleted && { fontStyle: 'italic', opacity: 0.7 }
+            ]}>
+              {item.body}
+            </Text>
+          )}
+
+          <Text style={[styles.time, isMine ? styles.timeMine : { color: theme.textMuted }]}>
+            {timeAgo(item.created_at)}
+          </Text>
+          {!item.is_deleted && msgType !== 'system' && (
+            <View style={styles.reactionsRow}>
+              {(item.reactions || []).map((reaction) => (
+                <TouchableOpacity
+                  key={reaction.emoji}
+                  onPress={() => handleReact(item)}
+                  style={[styles.reactionChip, reaction.mine && styles.myReactionChip]}
+                >
+                  <Text style={styles.reactionText}>{reaction.emoji} {reaction.count}</Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity onPress={() => handleReact(item)} style={styles.addReaction}>
+                <Text style={{ color: isMine ? '#fff' : theme.textMuted }}>+</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </TouchableOpacity>
+      </View>
     );
   };
 
@@ -368,6 +505,11 @@ export default function ChatScreen({ route, navigation }) {
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
           onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
+        {messageError ? (
+          <Text style={{ color: '#E53935', paddingHorizontal: 16, paddingBottom: 8 }}>
+            {messageError}
+          </Text>
+        ) : null}
         
         {otherIsTyping && (
           <View style={styles.typingContainer}>
@@ -423,7 +565,6 @@ export default function ChatScreen({ route, navigation }) {
               source={viewerImage}
               style={{ width: '100%', height: '80%' }} 
               resizeMode="contain" 
-              onError={() => Alert.alert('Media unavailable', 'This image could not be loaded. Check your connection or sign in again.')}
             />
           )}
         </View>
@@ -437,18 +578,31 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   list: { padding: 16, paddingBottom: 20 },
-  bubble: { maxWidth: '80%', padding: 12, borderRadius: 16, marginBottom: 12 },
-  bubbleMine: { alignSelf: 'flex-end', backgroundColor: '#C65D3B', borderBottomRightRadius: 4 },
-  bubbleTheirs: { alignSelf: 'flex-start', backgroundColor: '#E6E6E6', borderBottomLeftRadius: 4 },
+  messageRow: { flexDirection: 'row', alignItems: 'flex-end', marginBottom: 12, maxWidth: '100%' },
+  rowLeft: { justifyContent: 'flex-start' },
+  rowRight: { justifyContent: 'flex-end' },
+  avatarWrapper: { marginRight: 8, marginBottom: 2 },
+  chatAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#E6E6E6' },
+  chatAvatarPlaceholder: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  bubble: { maxWidth: '75%', padding: 12, borderRadius: 16 },
+  bubbleMine: { backgroundColor: '#C65D3B', borderBottomRightRadius: 4 },
+  bubbleTheirs: { backgroundColor: '#E6E6E6', borderBottomLeftRadius: 4 },
+  senderName: { fontSize: 12, fontWeight: '700', marginBottom: 4 },
   msgText: { fontSize: 16, lineHeight: 22 },
   msgTextMine: { color: '#fff' },
   messageImage: { width: 200, height: 200, borderRadius: 8, marginBottom: 4, resizeMode: 'cover' },
   time: { fontSize: 11, marginTop: 4, textAlign: 'right' },
   timeMine: { color: 'rgba(255,255,255,0.7)' },
+  reactionsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 5 },
+  reactionChip: { backgroundColor: 'rgba(127,127,127,0.18)', borderRadius: 12, paddingHorizontal: 7, paddingVertical: 3 },
+  myReactionChip: { borderWidth: 1, borderColor: '#8EA7FF' },
+  reactionText: { fontSize: 12 },
+  addReaction: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(127,127,127,0.18)' },
   typingContainer: { paddingHorizontal: 16, paddingVertical: 8 },
   typingText: { fontSize: 13, fontStyle: 'italic' },
   inputRow: { flexDirection: 'row', padding: 12, borderTopWidth: 1, alignItems: 'center' },
   iconBtn: { padding: 8, marginRight: 4 },
   input: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, maxHeight: 100 },
   sendBtn: { marginLeft: 8, padding: 8, minWidth: 44, alignItems: 'center' },
+  loadVideoButton: { width: 240, height: 180, borderRadius: 8, backgroundColor: '#444', alignItems: 'center', justifyContent: 'center' },
 });

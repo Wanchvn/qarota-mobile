@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, 
   Image, ActivityIndicator, Alert, KeyboardAvoidingView, Platform 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { ChevronLeft, ShieldCheck, UploadCloud, CheckCircle2 } from 'lucide-react-native';
+import { ChevronLeft, ShieldCheck, UploadCloud, CheckCircle2, Clock } from 'lucide-react-native';
 import { apiRequest, getAuthToken, API_BASE } from '../lib/api';
 import { useTheme } from '../lib/theme';
 
@@ -13,11 +13,12 @@ export default function VerificationRequestScreen({ navigation }) {
   const theme = useTheme();
   
   const [loading, setLoading] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [currentStatus, setCurrentStatus] = useState('none'); // 'none', 'pending', 'approved'
 
   // Form State
   const [fullName, setFullName] = useState('');
-  const [category, setCategory] = useState('personal'); // 'personal', 'organization', 'staff'
+  const [category, setCategory] = useState('personal'); 
   const [country, setCountry] = useState('Ghana');
   const [idType, setIdType] = useState('national_id');
   const [idNumber, setIdNumber] = useState('');
@@ -26,6 +27,25 @@ export default function VerificationRequestScreen({ navigation }) {
   // Images
   const [frontImage, setFrontImage] = useState(null);
   const [backImage, setBackImage] = useState(null);
+
+  // Check current status on mount
+  useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const res = await apiRequest('me.php');
+        if (res.success && res.user) {
+          if (res.user.verification_type && res.user.verification_type !== 'none') {
+            setCurrentStatus('approved');
+          }
+        }
+      } catch (e) {
+        console.log('Error checking verification status:', e);
+      } finally {
+        setInitialLoading(false);
+      }
+    };
+    checkStatus();
+  }, []);
 
   const pickImage = async (side) => {
     const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -60,7 +80,6 @@ export default function VerificationRequestScreen({ navigation }) {
     formData.append('id_number', idNumber);
     formData.append('reason', reason);
 
-    // Handle iOS URIs
     let frontUri = frontImage.uri;
     let backUri = backImage ? backImage.uri : null;
 
@@ -69,13 +88,11 @@ export default function VerificationRequestScreen({ navigation }) {
       if (backUri && backUri.startsWith('file://')) backUri = backUri.replace('file://', '/private');
     }
 
-    // Append Front ID
     const frontFilename = frontUri.split('/').pop();
     const frontMatch = /\.(\w+)$/.exec(frontFilename);
     const frontType = frontMatch ? `image/${frontMatch[1]}` : `image/jpeg`;
     formData.append('id_front', { uri: frontUri, name: frontFilename, type: frontType });
 
-    // Append Back ID (if exists)
     if (backUri) {
       const backFilename = backUri.split('/').pop();
       const backMatch = /\.(\w+)$/.exec(backFilename);
@@ -83,7 +100,6 @@ export default function VerificationRequestScreen({ navigation }) {
       formData.append('id_back', { uri: backUri, name: backFilename, type: backType });
     }
 
-    // --- REPLACED FETCH WITH XMLHTTPREQUEST ---
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${API_BASE}/apply_verification.php`);
     xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
@@ -95,7 +111,7 @@ export default function VerificationRequestScreen({ navigation }) {
         try {
           const data = JSON.parse(xhr.responseText);
           if (data.success) {
-            setSubmitted(true);
+            setCurrentStatus('pending'); // Move to pending state
           } else {
             Alert.alert('Error', data.error || 'Could not submit application.');
           }
@@ -115,7 +131,12 @@ export default function VerificationRequestScreen({ navigation }) {
     xhr.send(formData);
   };
 
-  if (submitted) {
+  if (initialLoading) {
+    return <View style={[styles.center, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
+  }
+
+  // --- SCREEN STATE: ALREADY VERIFIED ---
+  if (currentStatus === 'approved') {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
         <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
@@ -126,10 +147,10 @@ export default function VerificationRequestScreen({ navigation }) {
           <View style={{ width: 36 }} />
         </View>
         <View style={styles.center}>
-          <CheckCircle2 color={theme.primary} size={80} style={{ marginBottom: 24 }} />
-          <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800', marginBottom: 12 }}>Application Submitted</Text>
+          <ShieldCheck color={theme.primary} size={80} style={{ marginBottom: 24 }} />
+          <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800', marginBottom: 12 }}>You are Verified</Text>
           <Text style={{ color: theme.textMuted, fontSize: 16, textAlign: 'center', lineHeight: 24 }}>
-            Thank you! Our team will review your documents and update your account within 24-48 hours.
+            Your identity has already been verified. A verification badge is displayed on your profile.
           </Text>
           <TouchableOpacity 
             style={[styles.btn, { backgroundColor: theme.primary, marginTop: 32, width: '80%' }]} 
@@ -142,6 +163,35 @@ export default function VerificationRequestScreen({ navigation }) {
     );
   }
 
+  // --- SCREEN STATE: PENDING REVIEW ---
+  if (currentStatus === 'pending') {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
+        <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ padding: 4 }}>
+            <ChevronLeft color={theme.text} size={28} />
+          </TouchableOpacity>
+          <Text style={[styles.title, { color: theme.text }]}>Verification</Text>
+          <View style={{ width: 36 }} />
+        </View>
+        <View style={styles.center}>
+          <Clock color="#FF9800" size={80} style={{ marginBottom: 24 }} />
+          <Text style={{ color: theme.text, fontSize: 24, fontWeight: '800', marginBottom: 12 }}>Application Submitted</Text>
+          <Text style={{ color: theme.textMuted, fontSize: 16, textAlign: 'center', lineHeight: 24 }}>
+            Your verification request is currently under review. Our team will update your account within 24-48 hours.
+          </Text>
+          <TouchableOpacity 
+            style={[styles.btn, { backgroundColor: theme.primary, marginTop: 32, width: '80%' }]} 
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.btnText}>Return to Settings</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // --- SCREEN STATE: NONE (SHOW FORM) ---
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
       <View style={[styles.header, { backgroundColor: theme.surface, borderBottomColor: theme.border }]}>
@@ -231,7 +281,6 @@ export default function VerificationRequestScreen({ navigation }) {
             />
           </View>
 
-          {/* Document Uploads */}
           <Text style={[styles.label, { color: theme.text, marginTop: 12, marginBottom: 8 }]}>Upload ID Documents *</Text>
           
           <View style={{ flexDirection: 'row', gap: 12 }}>

@@ -56,7 +56,7 @@ export default function LoginScreen({ navigation, onLogin }) {
     >
       <View style={styles.inner}>
         <Text style={[styles.logo, { color: theme.text }]}>Qarota</Text>
-        <Text style={[styles.tagline, { color: theme.primary }]}>Africa's social network</Text>
+        <Text style={[styles.tagline, { color: theme.primary }]}>Africa&apos;s social network</Text>
 
         <TextInput
           style={[styles.input, { backgroundColor: theme.surface, borderColor: theme.border, color: theme.text }]}
@@ -99,11 +99,14 @@ export default function LoginScreen({ navigation, onLogin }) {
         </TouchableOpacity>
 
         <View style={{ flexDirection: 'row', justifyContent: 'center', marginTop: 24 }}>
-          <Text style={{ color: theme.textMuted }}>Don't have an account? </Text>
+          <Text style={{ color: theme.textMuted }}>Don&apos;t have an account? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Register')}>
             <Text style={{ color: theme.primary, fontWeight: '700' }}>{t('signup')}</Text>
           </TouchableOpacity>
         </View>
+        <TouchableOpacity onPress={() => navigation.navigate('Appeal')} style={{ alignSelf: 'center', marginTop: 18 }}>
+          <Text style={{ color: theme.textMuted, fontWeight: '600' }}>Appeal a suspended account</Text>
+        </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
   );

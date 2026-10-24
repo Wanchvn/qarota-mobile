@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, Text, StyleSheet, FlatList, ActivityIndicator, 
   TouchableOpacity, RefreshControl, Alert 
@@ -18,24 +18,31 @@ export default function TopicDetailScreen({ route, navigation }) {
   const [refreshing, setRefreshing] = useState(false);
   const [isMember, setIsMember] = useState(false);
 
-  const fetchTopicPosts = async () => {
+  const fetchTopicPosts = useCallback(async () => {
     try {
       const res = await apiRequest(`get_topic_posts.php?name=${encodeURIComponent(topicName)}`);
       if (res.success) {
         setPosts(res.posts || []);
         setIsMember(res.is_member || false); // <-- Get member status
+      } else {
+        setPosts([]);
+        setIsMember(false);
+        Alert.alert('Could not load topic', res.error || 'Please try again.');
       }
     } catch (e) {
       console.error(e);
+      setPosts([]);
+      setIsMember(false);
+      Alert.alert('Could not load topic', 'Check your connection and try again.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [topicName]);
 
   useEffect(() => {
-    fetchTopicPosts();
-  }, [topicName]);
+    return navigation.addListener('focus', fetchTopicPosts);
+  }, [fetchTopicPosts, navigation]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -43,26 +50,29 @@ export default function TopicDetailScreen({ route, navigation }) {
   };
 
   const handleToggleJoin = async () => {
-    // Optimistic UI update
-    setIsMember(!isMember);
-
     try {
       const res = await apiRequest('topic_toggle.php', {
         method: 'POST',
         json: { topic_name: topicName }
       });
-      if (!res.success) {
-        setIsMember(isMember); // Revert on fail
-        Alert.alert('Error', 'Could not update topic membership.');
-      }
+      if (res.success) setIsMember(res.state === 'joined');
+      else Alert.alert('Error', res.error || 'Could not update topic membership.');
     } catch (e) {
-      setIsMember(isMember);
+      Alert.alert('Error', 'Network error. Could not update topic membership.');
     }
   };
 
   const handleLike = async (postId) => {
-    setPosts((current) => current.map(p => p.id === postId ? { ...p, stats: { ...p.stats, liked_by_me: !p.stats.liked_by_me, likes: p.stats.liked_by_me ? p.stats.likes - 1 : p.stats.likes + 1 } } : p));
-    await apiRequest('like.php', { method: 'POST', json: { post_id: postId } });
+    const result = await apiRequest('like.php', { method: 'POST', json: { post_id: postId } });
+    if (!result.success) {
+      Alert.alert('Could not update like', result.error || 'Please try again.');
+      return;
+    }
+    setPosts((current) => current.map((post) => (
+      post.id === postId
+        ? { ...post, stats: { ...post.stats, liked_by_me: result.liked, likes: result.like_count } }
+        : post
+    )));
   };
 
   return (

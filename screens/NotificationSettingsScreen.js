@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Switch, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft } from 'lucide-react-native';
 import { apiRequest } from '../lib/api';
 import { useTheme } from '../lib/theme';
+
+const SettingRow = ({ theme, label, description, value, onToggle }) => (
+  <View style={[styles.row, { borderBottomColor: theme.border }]}>
+    <View style={{ flex: 1, paddingRight: 16 }}>
+      <Text style={[styles.label, { color: theme.text }]}>{label}</Text>
+      <Text style={[styles.description, { color: theme.textMuted }]}>{description}</Text>
+    </View>
+    <Switch
+      value={value}
+      onValueChange={onToggle}
+      trackColor={{ false: theme.border, true: theme.primary }}
+      thumbColor="#fff"
+    />
+  </View>
+);
 
 export default function NotificationSettingsScreen({ navigation }) {
   const theme = useTheme();
@@ -35,17 +50,20 @@ export default function NotificationSettingsScreen({ navigation }) {
   }, []);
 
   const toggleSwitch = async (key) => {
+    const previousSettings = settings;
     const newSettings = { ...settings, [key]: !settings[key] };
     setSettings(newSettings);
     setSaving(true);
 
     try {
-      await apiRequest('update_notification_settings.php', {
+      const result = await apiRequest('update_notification_settings.php', {
         method: 'POST',
         json: newSettings
       });
-    } catch (e) {
-      setSettings(settings); // Revert
+      if (!result.success) throw new Error(result.error || 'Notification setting update failed.');
+    } catch {
+      setSettings(previousSettings);
+      Alert.alert('Error', 'Could not save notification settings.');
     } finally {
       setSaving(false);
     }
@@ -54,21 +72,6 @@ export default function NotificationSettingsScreen({ navigation }) {
   if (loading) {
     return <View style={[styles.center, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
   }
-
-  const SettingRow = ({ label, description, value, onToggle }) => (
-    <View style={[styles.row, { borderBottomColor: theme.border }]}>
-      <View style={{ flex: 1, paddingRight: 16 }}>
-        <Text style={[styles.label, { color: theme.text }]}>{label}</Text>
-        <Text style={[styles.description, { color: theme.textMuted }]}>{description}</Text>
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onToggle}
-        trackColor={{ false: theme.border, true: theme.primary }}
-        thumbColor="#fff"
-      />
-    </View>
-  );
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]} edges={['top']}>
@@ -83,11 +86,11 @@ export default function NotificationSettingsScreen({ navigation }) {
       </View>
 
       <ScrollView>
-        <SettingRow label="Likes" description="When someone likes your post" value={settings.notify_likes} onToggle={() => toggleSwitch('notify_likes')} />
-        <SettingRow label="Comments" description="When someone comments on your post" value={settings.notify_comments} onToggle={() => toggleSwitch('notify_comments')} />
-        <SettingRow label="New Followers" description="When someone starts following you" value={settings.notify_follows} onToggle={() => toggleSwitch('notify_follows')} />
-        <SettingRow label="Messages" description="When you receive a new direct message" value={settings.notify_messages} onToggle={() => toggleSwitch('notify_messages')} />
-        <SettingRow label="Topic Posts" description="When someone posts in a topic you follow" value={settings.notify_topic_posts} onToggle={() => toggleSwitch('notify_topic_posts')} />
+        <SettingRow theme={theme} label="Likes" description="When someone likes your post" value={settings.notify_likes} onToggle={() => toggleSwitch('notify_likes')} />
+        <SettingRow theme={theme} label="Comments" description="When someone comments on your post" value={settings.notify_comments} onToggle={() => toggleSwitch('notify_comments')} />
+        <SettingRow theme={theme} label="New Followers" description="When someone starts following you" value={settings.notify_follows} onToggle={() => toggleSwitch('notify_follows')} />
+        <SettingRow theme={theme} label="Messages" description="When you receive a new direct message" value={settings.notify_messages} onToggle={() => toggleSwitch('notify_messages')} />
+        <SettingRow theme={theme} label="Topic Posts" description="When someone posts in a topic you follow" value={settings.notify_topic_posts} onToggle={() => toggleSwitch('notify_topic_posts')} />
       </ScrollView>
     </SafeAreaView>
   );

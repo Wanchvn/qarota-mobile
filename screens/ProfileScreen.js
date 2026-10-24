@@ -1,20 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  View, Text, StyleSheet, FlatList, Image, ActivityIndicator, 
+  View, Text, StyleSheet, FlatList, Image, ActivityIndicator, Platform,
   TouchableOpacity, RefreshControl, Modal, Alert, TextInput 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as SecureStore from 'expo-secure-store';
-import * as ImagePicker from 'expo-image-picker'; 
+import * as SecureStore from 'expo-secure-store'; 
 import { 
   MapPin, Briefcase, GraduationCap, Languages, Star, 
-  CheckCircle2, Eye, Lock, Users, Bookmark, Mail, UserPlus, UserMinus, Camera
+  BadgeCheck, Mail, UserPlus, UserMinus, Users
 } from 'lucide-react-native';
-import { apiRequest, setAuthToken, MEDIA_BASE, getAuthToken, API_BASE } from '../lib/api'; 
+import { apiRequest, MEDIA_BASE } from '../lib/api'; 
 import PostCard from '../components/PostCard';
 import CommentModal from '../components/CommentModal';
 import PostSkeleton from '../components/PostSkeleton'; 
-import { compressImage } from '../lib/imageUtils';
 import { useTheme } from '../lib/theme';
 
 export default function ProfileScreen({ route, navigation, onLogout }) {
@@ -26,9 +24,8 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activePostId, setActivePostId] = useState(null);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   
-  // FIXED: Added missing messaging state
+  const [myUsername, setMyUsername] = useState(null);
   const [messaging, setMessaging] = useState(false); 
 
   const [menuVisible, setMenuVisible] = useState(false);
@@ -53,6 +50,20 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
   };
 
   useEffect(() => {
+    const fetchMe = async () => {
+      try {
+        const res = await apiRequest('me.php');
+        if (res.success && res.user) {
+          setMyUsername(res.user.username);
+        }
+      } catch (e) {
+        console.log("Could not fetch my username", e);
+      }
+    };
+    fetchMe();
+  }, []);
+
+  useEffect(() => {
     navigation.setOptions({ title: viewUsername ? `@${viewUsername}` : 'My Profile' });
     const unsubscribe = navigation.addListener('focus', () => {
       fetchProfile();
@@ -65,85 +76,14 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
     fetchProfile();
   };
 
-  const handleLogout = async () => {
-    await apiRequest('logout.php', { method: 'POST' });
-    await SecureStore.deleteItemAsync('qarota_token');
-    setAuthToken(null);
-    if (onLogout) onLogout();
-  };
-
-  const handleAvatarChange = async () => {
-    const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permissionResult.granted) {
-      return Alert.alert("Permission required", "You need to allow Qarota to access your photos.");
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 1, 
-    });
-
-    if (!result.canceled) {
-      setUploadingAvatar(true);
-      const asset = result.assets[0];
-      
-      const compressedUri = await compressImage(asset.uri);
-      
-      // iOS Path Fix
-      let uriToUpload = compressedUri;
-      if (Platform.OS === 'ios' && compressedUri.startsWith('file://')) {
-        uriToUpload = compressedUri.replace('file://', '/private');
-      }
-      
-      const formData = new FormData();
-      formData.append('avatar', { 
-        uri: uriToUpload, 
-        name: 'avatar.jpg', 
-        type: 'image/jpeg' 
-      });
-
-      // Use XMLHttpRequest instead of fetch
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_BASE}/profile_update.php`);
-      xhr.setRequestHeader('Authorization', `Bearer ${getAuthToken()}`);
-      xhr.setRequestHeader('Accept', 'application/json');
-
-      xhr.onload = () => {
-        setUploadingAvatar(false);
-        if (xhr.status >= 200 && xhr.status < 300) {
-          try {
-            const data = JSON.parse(xhr.responseText);
-            if (data.success) {
-              fetchProfile(); 
-              Alert.alert('Success', 'Profile picture updated!');
-            } else {
-              Alert.alert('Error', data.error || 'Could not update picture.');
-            }
-          } catch (e) {
-            Alert.alert('Error', 'Invalid response.');
-          }
-        } else {
-          Alert.alert('Error', `Server responded with status ${xhr.status}`);
-        }
-      };
-
-      xhr.onerror = () => {
-        setUploadingAvatar(false);
-        Alert.alert('Error', 'Network error while uploading.');
-      };
-
-      xhr.send(formData);
-    }
-  };
-
   const handleFollow = async () => {
     const wasFollowing = profile.is_following;
+    const willBeFriend = !wasFollowing && profile.is_followed_by; // If I follow them, and they follow me
     
     setProfile(prev => ({ 
       ...prev, 
       is_following: !wasFollowing,
+      is_friend: willBeFriend,
       stats: {
         ...prev.stats,
         followers: wasFollowing ? prev.stats.followers - 1 : prev.stats.followers + 1
@@ -159,6 +99,7 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
       setProfile(prev => ({ 
         ...prev, 
         is_following: wasFollowing,
+        is_friend: wasFollowing && profile.is_followed_by, // rollback
         stats: {
           ...prev.stats,
           followers: wasFollowing ? prev.stats.followers + 1 : prev.stats.followers - 1
@@ -182,7 +123,8 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
         navigation.navigate('Chat', { 
           id: res.conversation_id, 
           name: profile.name,
-          avatar: profile.avatar 
+          avatar: profile.avatar,
+          username: profile.username
         });
       } else {
         Alert.alert('Message Error', res.error || 'Could not start conversation.');
@@ -240,15 +182,14 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
     setPosts((current) => current.filter(p => p.id !== postId));
   };
 
-  const DetailRow = ({ icon, text }) => {
-    if (!text) return null;
-    return (
+  const renderDetailRow = (icon, text) => (
+    text ? (
       <View style={styles.detailRow}>
         {icon}
         <Text style={[styles.detailText, { color: theme.text }]}>{text}</Text>
       </View>
-    );
-  };
+    ) : null
+  );
 
   if (loading) {
     return (
@@ -275,7 +216,9 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
     return <View style={[styles.center, { backgroundColor: theme.background }]}><Text style={{ color: theme.textMuted }}>User not found.</Text></View>;
   }
 
-  const Header = () => (
+  const isMyProfile = !viewUsername || viewUsername === myUsername;
+
+  const profileHeader = (
     <View style={styles.headerContainer}>
       
       <View style={styles.profileRow}>
@@ -287,19 +230,14 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
               <Text style={styles.avatarText}>{profile.name.charAt(0)}</Text>
             </View>
           )}
-          {uploadingAvatar && (
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 40, alignItems: 'center', justifyContent: 'center' }]}>
-              <ActivityIndicator color="#fff" />
-            </View>
-          )}
         </View>
         
         <View style={styles.profileInfo}>
           <View style={{ flexDirection: 'row', alignItems: 'center' }}>
             <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-              {viewUsername ? '' : 'Hello, '}{profile.name}
+              {isMyProfile ? 'Hello, ' : ''}{profile.name}
             </Text>
-            {profile.is_verified && <CheckCircle2 color={theme.primary} size={18} style={{ marginLeft: 6 }} />}
+            {profile.is_verified && <BadgeCheck color="#E5A93D" size={20} style={{ marginLeft: 6 }} />}
           </View>
           <Text style={[styles.username, { color: theme.textMuted }]}>@{profile.username}</Text>
         </View>
@@ -331,84 +269,93 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
       {profile.bio ? <Text style={[styles.bio, { color: theme.text }]}>{profile.bio}</Text> : null}
 
       <View style={styles.detailsContainer}>
-        <DetailRow icon={<MapPin color={theme.textMuted} size={16} />} text={profile.location} />
-        <DetailRow icon={<Briefcase color={theme.textMuted} size={16} />} text={profile.work} />
-        <DetailRow icon={<GraduationCap color={theme.textMuted} size={16} />} text={profile.education} />
-        <DetailRow icon={<Languages color={theme.textMuted} size={16} />} text={profile.languages} />
-        <DetailRow icon={<Star color={theme.textMuted} size={16} />} text={profile.interests} />
+        {renderDetailRow(<MapPin color={theme.textMuted} size={16} />, profile.location)}
+        {renderDetailRow(<Briefcase color={theme.textMuted} size={16} />, profile.work)}
+        {renderDetailRow(<GraduationCap color={theme.textMuted} size={16} />, profile.education)}
+        {renderDetailRow(<Languages color={theme.textMuted} size={16} />, profile.languages)}
+        {renderDetailRow(<Star color={theme.textMuted} size={16} />, profile.interests)}
       </View>
 
-      {!viewUsername && (
-        <View style={styles.actionGrid}>
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('EditProfile')}>
-            <Text style={[styles.actionBtnText, { color: theme.primary }]}>Edit profile</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: theme.primary }]} onPress={handleAvatarChange}>
-            <Text style={[styles.actionBtnText, { color: theme.primary }]}>Change picture</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('SavedPosts')}>
-            <Text style={[styles.actionBtnText, { color: theme.primary }]}>Saved posts</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: theme.primary }]} onPress={() => navigation.navigate('ExportData')}>
-            <Text style={[styles.actionBtnText, { color: theme.primary }]}>Export data</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: theme.border }]} onPress={() => navigation.navigate('Settings')}>
-            <Text style={[styles.actionBtnText, { color: theme.textMuted }]}>Privacy</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity style={[styles.actionBtn, { borderColor: '#E53935' }]} onPress={handleLogout}>
-            <Text style={[styles.actionBtnText, { color: '#E53935' }]}>Log out</Text>
+      {isMyProfile && (
+        <View style={styles.actionsContainer}>
+          <TouchableOpacity 
+            style={[styles.primaryBtn, { backgroundColor: theme.primary }]} 
+            onPress={() => navigation.navigate('EditProfile')}
+          >
+            <Text style={styles.primaryBtnText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {viewUsername && (
-        <View style={styles.actionGrid}>
-          <TouchableOpacity 
-            style={[styles.actionBtn, { borderColor: profile.is_following ? theme.border : theme.primary, flexDirection: 'row', gap: 6 }]} 
-            onPress={handleFollow}
-          >
-            {profile.is_following ? <UserMinus color={theme.textMuted} size={16} /> : <UserPlus color={theme.primary} size={16} />}
-            <Text style={[styles.actionBtnText, { color: profile.is_following ? theme.textMuted : theme.primary }]}>
-              {profile.is_following ? 'Unfollow' : 'Follow'}
-            </Text>
-          </TouchableOpacity>
+      {!isMyProfile && (
+        <View style={styles.actionsContainer}>
+          <View style={styles.profileActionsRow}>
+            
+            {/* FIXED BUTTON LOGIC HERE */}
+            <TouchableOpacity 
+              style={[
+                styles.profileActionBtn, 
+                { 
+                  borderColor: profile.is_friend ? theme.primary : (profile.is_following ? theme.border : theme.primary), 
+                  backgroundColor: profile.is_friend ? theme.primary : (profile.is_following ? 'transparent' : theme.primary) 
+                }
+              ]} 
+              onPress={handleFollow}
+            >
+              {profile.is_friend ? (
+                <>
+                  <Users color="#fff" size={18} />
+                  <Text style={[styles.profileActionText, { color: '#fff' }]}>Friends</Text>
+                </>
+              ) : profile.is_following ? (
+                <>
+                  <UserMinus color={theme.textMuted} size={18} />
+                  <Text style={[styles.profileActionText, { color: theme.textMuted }]}>Following</Text>
+                </>
+              ) : profile.is_followed_by ? (
+                <>
+                  <UserPlus color="#fff" size={18} />
+                  <Text style={[styles.profileActionText, { color: '#fff' }]}>Follow Back</Text>
+                </>
+              ) : (
+                <>
+                  <UserPlus color="#fff" size={18} />
+                  <Text style={[styles.profileActionText, { color: '#fff' }]}>Follow</Text>
+                </>
+              )}
+            </TouchableOpacity>
 
-          {/* FIXED: Added messaging spinner to the button */}
-          <TouchableOpacity 
-            style={[styles.actionBtn, { borderColor: theme.primary, flexDirection: 'row', gap: 6 }]} 
-            onPress={handleMessage}
-            disabled={messaging}
-          >
-            {messaging ? (
-              <ActivityIndicator size="small" color={theme.primary} />
-            ) : (
-              <>
-                <Mail color={theme.primary} size={16} />
-                <Text style={[styles.actionBtnText, { color: theme.primary }]}>Message</Text>
-              </>
-            )}
-          </TouchableOpacity>
+            <TouchableOpacity 
+              style={[styles.profileActionBtn, { borderColor: theme.primary, backgroundColor: 'transparent' }]} 
+              onPress={handleMessage}
+              disabled={messaging}
+            >
+              {messaging ? (
+                <ActivityIndicator size="small" color={theme.primary} />
+              ) : (
+                <>
+                  <Mail color={theme.primary} size={18} />
+                  <Text style={[styles.profileActionText, { color: theme.primary }]}>Message</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
           
           <TouchableOpacity 
-            style={[styles.actionBtn, { borderColor: theme.border, flexDirection: 'row', gap: 6 }]} 
+            style={[styles.secondaryBtn, { width: '100%', marginTop: 10, borderColor: theme.border, backgroundColor: theme.surface }]} 
             onPress={() => setMenuVisible(true)}
           >
-            <Text style={[styles.actionBtnText, { color: theme.textMuted }]}>Options</Text>
+            <Text style={[styles.secondaryBtnText, { color: theme.textMuted }]}>More Options</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {!viewUsername && (
+      {isMyProfile && (
         <TouchableOpacity 
           style={[styles.composePrompt, { backgroundColor: theme.background, borderColor: theme.border }]}
           onPress={() => navigation.navigate('Compose')}
         >
-          <Text style={{ color: theme.textMuted }}>What's on your mind?</Text>
+          <Text style={{ color: theme.textMuted }}>What&apos;s on your mind?</Text>
         </TouchableOpacity>
       )}
     </View>
@@ -419,7 +366,7 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
       <FlatList
         data={posts}
         keyExtractor={(item) => item.id.toString()}
-        ListHeaderComponent={<Header />}
+        ListHeaderComponent={profileHeader}
         renderItem={({ item }) => (
           <PostCard 
             post={item} 
@@ -479,8 +426,8 @@ export default function ProfileScreen({ route, navigation, onLogout }) {
               value={reportReason}
               onChangeText={setReportReason}
             />
-            <TouchableOpacity style={[styles.actionBtn, { backgroundColor: theme.primary, borderColor: theme.primary, padding: 14 }]} onPress={handleReport}>
-              <Text style={{ color: '#fff', fontWeight: 'bold' }}>Submit Report</Text>
+            <TouchableOpacity style={[styles.primaryBtn, { marginBottom: 0 }]} onPress={handleReport}>
+              <Text style={styles.primaryBtnText}>Submit Report</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ padding: 16, alignItems: 'center' }} onPress={() => setReportModal(false)}>
               <Text style={{ color: theme.textMuted }}>Cancel</Text>
@@ -514,9 +461,20 @@ const styles = StyleSheet.create({
   detailsContainer: { marginBottom: 16 },
   detailRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
   detailText: { fontSize: 14, marginLeft: 10, flex: 1 },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  actionBtn: { paddingVertical: 8, paddingHorizontal: 12, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  actionBtnText: { fontSize: 13, fontWeight: '600' },
+  
+  // ACTION STYLES
+  actionsContainer: { marginBottom: 16, marginTop: 8 },
+  primaryBtn: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  primaryBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  
+  secondaryBtn: { flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  secondaryBtnText: { fontSize: 13, fontWeight: '600' },
+
+  // PROFILE ACTIONS ROW (For other users)
+  profileActionsRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  profileActionBtn: { flex: 1, flexDirection: 'row', paddingVertical: 12, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  profileActionText: { fontSize: 15, fontWeight: '700' },
+
   composePrompt: { padding: 16, borderRadius: 8, borderWidth: 1, marginTop: 8 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   actionSheet: { borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingBottom: 30, paddingTop: 10 },

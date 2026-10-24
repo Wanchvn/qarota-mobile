@@ -27,7 +27,7 @@ const InputField = ({ icon, placeholder, value, onChangeText, secureTextEntry, k
 );
 // ------------------------------------------
 
-export default function RegisterScreen({ navigation, onLogin }) {
+export default function RegisterScreen({ navigation }) {
   const theme = useTheme();
   
   const [displayName, setDisplayName] = useState('');
@@ -56,8 +56,8 @@ export default function RegisterScreen({ navigation, onLogin }) {
       });
 
       if (res.success) {
-        Alert.alert('Welcome to Qarota!', 'Your account has been created successfully.', [
-          { text: 'Continue', onPress: () => onLogin() }
+        Alert.alert('Account created', 'Your account has been created. Please sign in to continue.', [
+          { text: 'Sign in', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Login' }] }) }
         ]);
       } else {
         Alert.alert('Registration Failed', res.error || 'Could not create account.');
@@ -94,7 +94,7 @@ export default function RegisterScreen({ navigation, onLogin }) {
             </View>
             <Text style={[styles.title, { color: theme.text }]}>Join Qarota</Text>
             <Text style={{ color: theme.textMuted, textAlign: 'center', marginTop: 8, paddingHorizontal: 20 }}>
-              Your data stays in Ghana. Your voice can't be silenced.
+              Your data stays in Ghana. Your voice can&apos;t be silenced.
             </Text>
           </View>
 

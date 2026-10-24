@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, ActivityIndicator, RefreshControl, TouchableOpacity, Image, Alert } from 'react-native'; // <-- ADDED Alert
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Compass, Bell, Search } from 'lucide-react-native'; 
@@ -9,6 +9,10 @@ import PostCard from '../components/PostCard';
 import CommentModal from '../components/CommentModal';
 import ProfileDropdown from '../components/ProfileDropdown';
 import PostSkeleton from '../components/PostSkeleton';
+
+const viewabilityConfig = {
+  itemVisiblePercentThreshold: 50,
+};
 
 export default function HomeScreen({ navigation, onLogout }) {
   const theme = useTheme();
@@ -30,16 +34,12 @@ export default function HomeScreen({ navigation, onLogout }) {
 
   const [visiblePostId, setVisiblePostId] = useState(null);
   
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-  }).current;
-
-  const onViewableItemsChanged = useRef(({ viewableItems }) => {
+  const onViewableItemsChanged = useCallback(({ viewableItems }) => {
     if (viewableItems.length > 0) {
       const visibleVideo = viewableItems.find(item => item.item.media_type === 'video');
       setVisiblePostId(visibleVideo ? visibleVideo.item.id : null);
     }
-  }).current;
+  }, []);
 
   const getMediaUrl = (path) => {
     if (!path) return null;
@@ -47,9 +47,7 @@ export default function HomeScreen({ navigation, onLogout }) {
     return `${MEDIA_BASE}/${path.replace(/^\//, '')}`;
   };
 
-  const fetchFeed = async (pageNum = 1, isRefresh = false) => {
-    if (!hasMore && pageNum > 1) return;
-
+  const fetchFeed = useCallback(async (pageNum = 1) => {
     try {
       const res = await apiRequest(`feed.php?page=${pageNum}&limit=15`);
       if (res.success) {
@@ -86,20 +84,30 @@ export default function HomeScreen({ navigation, onLogout }) {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchFeed(1);
-    const unsubscribe = navigation.addListener('focus', () => {
-      if (page === 1) fetchFeed(1);
-    });
-    return unsubscribe;
-  }, [navigation]);
+    let pendingFetch = null;
+    const scheduleFetch = () => {
+      if (pendingFetch !== null) clearTimeout(pendingFetch);
+      pendingFetch = setTimeout(() => {
+        pendingFetch = null;
+        fetchFeed(1);
+      }, 0);
+    };
+
+    scheduleFetch();
+    const unsubscribe = navigation.addListener('focus', scheduleFetch);
+    return () => {
+      if (pendingFetch !== null) clearTimeout(pendingFetch);
+      unsubscribe();
+    };
+  }, [navigation, fetchFeed]);
 
   const onRefresh = () => {
     setRefreshing(true);
     setHasMore(true);
-    fetchFeed(1, true);
+    fetchFeed(1);
   };
 
   const loadMore = () => {
@@ -123,7 +131,7 @@ export default function HomeScreen({ navigation, onLogout }) {
         const suggestRes = await apiRequest('get_suggested_users.php');
         if (suggestRes.success) setSuggestedUsers(suggestRes.suggested || []);
       }
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Network error.');
     }
   };
@@ -160,13 +168,17 @@ export default function HomeScreen({ navigation, onLogout }) {
                     <Image source={{ uri: getMediaUrl(user.avatar) }} style={styles.avatarImage} />
                   ) : (
                     <View style={[styles.avatar, { backgroundColor: theme.primary }]}>
-                      <Text style={styles.avatarText}>{user.name.charAt(0)}</Text>
+                      <Text style={styles.avatarText}>
+                        {(user.name || user.username || 'U').charAt(0).toUpperCase()}
+                      </Text>
                     </View>
                   )}
                 </TouchableOpacity>
                 
                 <View style={styles.userInfo}>
-                  <Text style={[styles.userName, { color: theme.text }]} numberOfLines={1}>{user.name}</Text>
+                  <Text style={[styles.userName, { color: theme.text }]} numberOfLines={1}>
+                    {user.name || user.username || 'User'}
+                  </Text>
                   <Text style={[styles.userReason, { color: theme.textMuted }]} numberOfLines={1}>@{user.username}</Text>
                 </View>
 
@@ -276,7 +288,7 @@ export default function HomeScreen({ navigation, onLogout }) {
             <Text style={{ fontSize: 60, marginBottom: 20 }}>🌍</Text>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>Welcome to Qarota!</Text>
             <Text style={[styles.emptySub, { color: theme.textMuted }]}>
-              Your feed is empty because you aren't following anyone yet. 
+              Your feed is empty because you aren&apos;t following anyone yet.
               Tap below to discover new people and topics.
             </Text>
             <TouchableOpacity 

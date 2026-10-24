@@ -44,8 +44,7 @@ export default function ExportDataScreen({ navigation }) {
         <Text style={[styles.heading, { color: theme.text }]}>Your data belongs to you.</Text>
         
         <Text style={[styles.description, { color: theme.textMuted }]}>
-          Click the button below to request a complete archive of your Qarota data. 
-          This includes your profile information, posts, comments, and messages in a standard JSON format.
+          Mobile data exports are not available yet. Use the Export my data page on the Qarota website to download your archive.
         </Text>
 
         <TouchableOpacity 

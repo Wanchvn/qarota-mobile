@@ -4,7 +4,7 @@ import {
   ActivityIndicator, KeyboardAvoidingView, Platform, Image, Alert 
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, Send } from 'lucide-react-native';
+import { ChevronLeft, Send, X, CornerDownRight } from 'lucide-react-native';
 import { apiRequest, MEDIA_BASE } from '../lib/api';
 import { useTheme } from '../lib/theme';
 import PostCard from '../components/PostCard';
@@ -14,12 +14,15 @@ export default function PostDetailScreen({ route, navigation }) {
   const { postId } = route.params;
   const theme = useTheme();
   const flatListRef = useRef();
+  const inputRef = useRef(null); // <-- ADDED: Ref for the text input
 
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  
+  const [replyTo, setReplyTo] = useState(null); 
 
   const getMediaUrl = (path) => {
     if (!path) return null;
@@ -51,7 +54,6 @@ export default function PostDetailScreen({ route, navigation }) {
 
   const handleLike = async () => {
     if (!post) return;
-    
     setPost(prev => ({
       ...prev,
       stats: {
@@ -60,7 +62,6 @@ export default function PostDetailScreen({ route, navigation }) {
         likes: prev.stats.liked_by_me ? prev.stats.likes - 1 : prev.stats.likes + 1
       }
     }));
-
     await apiRequest('like.php', { method: 'POST', json: { post_id: post.id } });
   };
 
@@ -74,17 +75,20 @@ export default function PostDetailScreen({ route, navigation }) {
     try {
       const res = await apiRequest('comment_create.php', {
         method: 'POST',
-        json: { post_id: postId, content: commentContent }
+        json: { 
+          post_id: postId, 
+          content: commentContent,
+          parent_id: replyTo ? replyTo.id : null 
+        }
       });
 
       if (res.success) {
         setComments(prev => [res.comment, ...prev]);
-        
         setPost(prev => ({
           ...prev,
           stats: { ...prev.stats, comments: prev.stats.comments + 1 }
         }));
-
+        setReplyTo(null);
         flatListRef.current?.scrollToOffset({ offset: 0, animated: true });
       } else {
         setText(commentContent);
@@ -127,33 +131,6 @@ export default function PostDetailScreen({ route, navigation }) {
     );
   };
 
-  const handleReportComment = (commentId) => {
-    Alert.alert(
-      "Report Comment",
-      "Why are you reporting this comment?",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Spam", onPress: () => submitReport(commentId, 'spam') },
-        { text: "Harassment", onPress: () => submitReport(commentId, 'harassment') },
-        { text: "Other", onPress: () => submitReport(commentId, 'other') }
-      ]
-    );
-  };
-
-  const submitReport = async (commentId, reason) => {
-    try {
-      const res = await apiRequest('report.php', {
-        method: 'POST',
-        json: { comment_id: commentId, reason: reason, details: 'Reported from app' }
-      });
-      if (res.success) {
-        Alert.alert('Reported', 'Thank you. Our moderators will review this comment.');
-      }
-    } catch (e) {
-      Alert.alert('Error', 'Network error.');
-    }
-  };
-
   if (loading) {
     return <View style={[styles.center, { backgroundColor: theme.background }]}><ActivityIndicator size="large" color={theme.primary} /></View>;
   }
@@ -177,34 +154,63 @@ export default function PostDetailScreen({ route, navigation }) {
           ref={flatListRef}
           data={comments}
           keyExtractor={(item) => item.id.toString()}
-          keyboardShouldPersistTaps="handled" // <-- FIXED
-          renderItem={({ item }) => (
-            // MOVED RENDER COMMENT INLINE BUT KEPT KEYBOARD PERSIST
-            <TouchableOpacity 
-              activeOpacity={0.7}
-              onLongPress={() => {
-                if (item.author.is_me) handleDeleteComment(item.id);
-                else handleReportComment(item.id);
-              }}
-              style={[styles.commentRow, { borderBottomColor: theme.border }]}
-            >
-              {item.author.avatar ? (
-                <Image source={{ uri: getMediaUrl(item.author.avatar) }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatarPlaceholder, { backgroundColor: theme.primary }]}>
-                  <Text style={styles.avatarText}>{item.author.name.charAt(0)}</Text>
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => {
+            const isReply = item.parent_id !== null;
+            const parentComment = isReply ? comments.find(c => c.id === item.parent_id) : null;
+
+            return (
+              <TouchableOpacity 
+                activeOpacity={0.7}
+                onLongPress={item.author.is_me ? () => handleDeleteComment(item.id) : undefined}
+                style={[
+                  styles.commentRow, 
+                  { borderBottomColor: theme.border },
+                  isReply && { marginLeft: 30, borderLeftWidth: 2, borderLeftColor: theme.border }
+                ]}
+              >
+                {item.author.avatar ? (
+                  <Image source={{ uri: getMediaUrl(item.author.avatar) }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatarPlaceholder, { backgroundColor: theme.primary }]}>
+                    <Text style={styles.avatarText}>{item.author.name.charAt(0)}</Text>
+                  </View>
+                )}
+                
+                <View style={styles.commentContent}>
+                  <View style={styles.commentHeader}>
+                    <Text style={[styles.authorName, { color: theme.text }]}>
+                      {item.author.name}
+                    </Text>
+                    <Text style={[styles.time, { color: theme.textMuted }]}>{timeAgo(item.created_at)}</Text>
+                  </View>
+                  
+                  {isReply && parentComment && (
+                    <Text style={[styles.replyingToText, { color: theme.textMuted }]}>
+                      Replying to <Text style={{fontWeight: 'bold'}}>@{parentComment.author.username}</Text>
+                    </Text>
+                  )}
+
+                  <Text style={[styles.commentText, { color: theme.text }]}>{item.content}</Text>
+                  
+                  {/* UPDATED: Reply button focuses the input */}
+                  <TouchableOpacity 
+                    style={styles.replyBtn}
+                    onPress={() => {
+                      setReplyTo(item);
+                      // Small timeout ensures the UI updates before focusing
+                      setTimeout(() => {
+                        inputRef.current?.focus();
+                      }, 50);
+                    }}
+                  >
+                    <CornerDownRight color={theme.primary} size={14} />
+                    <Text style={[styles.replyBtnText, { color: theme.primary }]}>Reply</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
-              
-              <View style={styles.commentContent}>
-                <View style={styles.commentHeader}>
-                  <Text style={[styles.authorName, { color: theme.text }]}>{item.author.name}</Text>
-                  <Text style={[styles.time, { color: theme.textMuted }]}>{timeAgo(item.created_at)}</Text>
-                </View>
-                <Text style={[styles.commentText, { color: theme.text }]}>{item.content}</Text>
-              </View>
-            </TouchableOpacity>
-          )}
+              </TouchableOpacity>
+            );
+          }}
           ListHeaderComponent={
             <>
               {post && (
@@ -235,21 +241,36 @@ export default function PostDetailScreen({ route, navigation }) {
         />
 
         <View style={[styles.inputContainer, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
-          <TextInput
-            style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
-            placeholder="Write a comment..."
-            placeholderTextColor={theme.textMuted}
-            value={text}
-            onChangeText={setText}
-            multiline
-          />
-          <TouchableOpacity 
-            style={[styles.sendBtn, { backgroundColor: text.trim() ? theme.primary : theme.border }]} 
-            onPress={handleSendComment}
-            disabled={!text.trim() || submitting}
-          >
-            {submitting ? <ActivityIndicator color="#fff" size="small" /> : <Send color="#fff" size={18} />}
-          </TouchableOpacity>
+          
+          {replyTo && (
+            <View style={[styles.replyBanner, { backgroundColor: theme.background }]}>
+              <Text style={{ color: theme.textMuted, fontSize: 12 }}>
+                Replying to <Text style={{ fontWeight: 'bold', color: theme.text }}>@{replyTo.author.username}</Text>
+              </Text>
+              <TouchableOpacity onPress={() => setReplyTo(null)}>
+                <X color={theme.textMuted} size={16} />
+              </TouchableOpacity>
+            </View>
+          )}
+
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', flex: 1 }}>
+            <TextInput
+              ref={inputRef} // <-- ADDED: Attach the ref here
+              style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
+              placeholder={replyTo ? `Reply to @${replyTo.author.username}...` : "Write a comment..."}
+              placeholderTextColor={theme.textMuted}
+              value={text}
+              onChangeText={setText}
+              multiline
+            />
+            <TouchableOpacity 
+              style={[styles.sendBtn, { backgroundColor: text.trim() ? theme.primary : theme.border }]} 
+              onPress={handleSendComment}
+              disabled={!text.trim() || submitting}
+            >
+              {submitting ? <ActivityIndicator color="#fff" size="small" /> : <Send color="#fff" size={18} />}
+            </TouchableOpacity>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -271,8 +292,12 @@ const styles = StyleSheet.create({
   commentHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   authorName: { fontSize: 14, fontWeight: '700' },
   time: { fontSize: 12 },
+  replyingToText: { fontSize: 12, marginBottom: 4 },
   commentText: { fontSize: 15, lineHeight: 20 },
-  inputContainer: { flexDirection: 'row', alignItems: 'flex-end', padding: 12, borderTopWidth: 1 },
+  replyBtn: { flexDirection: 'row', alignItems: 'center', marginTop: 8, alignSelf: 'flex-start' },
+  replyBtnText: { fontSize: 12, fontWeight: '600', marginLeft: 4 },
+  inputContainer: { padding: 12, borderTopWidth: 1 },
+  replyBanner: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 8, borderRadius: 8, marginBottom: 8 },
   input: { flex: 1, borderWidth: 1, borderRadius: 20, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 12, maxHeight: 100, fontSize: 15 },
   sendBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', marginLeft: 8, marginBottom: 2 },
 });
